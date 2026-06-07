@@ -89,6 +89,10 @@
             "name": "Re-poll inverters",
             "description": "Force an immediate refresh of all paired inverters."
         },
+        "discover": {
+            "name": "Discover devices on mesh",
+            "description": "Diagnostic helper: ask the CC2530 for its current Zigbee neighbour table and routing table, log the result at INFO level. Use this when a configured inverter never answers polls and Re-bind fails — the dump reveals whether the inverter is on the mesh under a different short address."
+        },
         "reboot_inverter": {
             "name": "Reboot inverter",
             "description": "Send the proprietary reboot command to a paired inverter.",

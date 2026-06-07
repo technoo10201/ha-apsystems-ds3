@@ -44,6 +44,7 @@ RECOVERY_BACKOFF_S: Final = (5, 30, 120, 600)  # 5 s, 30 s, 2 min, then 10 min
 SERVICE_PAIR_INVERTER: Final = "pair_inverter"
 SERVICE_REPOLL: Final = "repoll"
 SERVICE_REBOOT_INVERTER: Final = "reboot_inverter"
+SERVICE_DISCOVER: Final = "discover"
 
 ATTR_SERIAL: Final = "serial"
 ATTR_NAME: Final = "name"

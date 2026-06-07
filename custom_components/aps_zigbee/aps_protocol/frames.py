@@ -141,3 +141,37 @@ def build_reboot_command(inv_id: str, ecu_id: str) -> str:
     wire_inv_id = swap_inv_id_bytes(inv_id)
     rev = ecu_id_reverse(ecu_id)
     return f"2401{wire_inv_id}1414060001000F13{rev}FBFB06C1000000000000A6FEFE"
+
+
+def build_zdo_mgmt_lqi_request(dst_addr: str = "0000", start_index: int = 0) -> str:
+    """Return the `ZDO_MGMT_LQI_REQ` payload (cmd 0x2531).
+
+    Asks a node (typically the dongle itself, `dst_addr=0000`) for its
+    neighbour table — the list of Zigbee devices it can hear directly. The
+    response (cmd 0x4531) carries `(short_addr, ext_addr, depth, lqi, ...)`
+    for every entry, so we can see exactly which inverter short addresses
+    are currently on the mesh, independent of whatever the config entry
+    claims.
+
+    `dst_addr` is the 4-char hex short address in *human* (big-endian)
+    form; `start_index` is the cursor for pagination (0 = start).
+
+    Spec: Texas Instruments Z-Stack ZNP API, `ZDO_MGMT_LQI_REQ`.
+    """
+    wire_dst = swap_inv_id_bytes(dst_addr)
+    return f"2531{wire_dst}{start_index:02X}"
+
+
+def build_zdo_mgmt_rtg_request(dst_addr: str = "0000", start_index: int = 0) -> str:
+    """Return the `ZDO_MGMT_RTG_REQ` payload (cmd 0x2532).
+
+    Sibling of `build_zdo_mgmt_lqi_request` — asks for the routing table
+    instead of the neighbour table. Routes show `dst_short_addr` and
+    `next_hop_short_addr` for every target the dongle has discovered (not
+    just direct neighbours), so this is what reveals mesh-reachable
+    inverters past the first hop.
+
+    Spec: Texas Instruments Z-Stack ZNP API, `ZDO_MGMT_RTG_REQ`.
+    """
+    wire_dst = swap_inv_id_bytes(dst_addr)
+    return f"2532{wire_dst}{start_index:02X}"

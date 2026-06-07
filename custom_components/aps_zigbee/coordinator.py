@@ -35,7 +35,11 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .aps_protocol.coordinator import check_coordinator, init_coordinator
 from .aps_protocol.decode_ds3 import DS3Reading, derive_power
-from .aps_protocol.frames import build_no_command
+from .aps_protocol.frames import (
+    build_no_command,
+    build_zdo_mgmt_lqi_request,
+    build_zdo_mgmt_rtg_request,
+)
 from .aps_protocol.pairing import (
     PairingError,
     _build_invid_blacklist,
@@ -227,6 +231,54 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
         )
         await self.async_request_refresh()
         return inv_id
+
+    async def async_discover(self) -> dict[str, list[str]]:
+        """Dump the dongle's neighbour + routing tables to the HA log.
+
+        Diagnostic helper: when a configured inverter never answers polls
+        (timeout, no AF_DATA_CONFIRM) and a Re-bind also fails to extract
+        a fresh short address, we don't know whether the inverter is
+        offline, on the mesh under a different short address, or has lost
+        its ECU binding entirely. This method asks the CC2530 itself for
+        its view of the network via two standard ZDO management
+        commands:
+
+        - ``ZDO_MGMT_LQI_REQ`` (cmd 0x2531) → direct neighbour table
+          (short_addr, ext_addr, depth, LQI for each device the dongle
+          hears directly).
+        - ``ZDO_MGMT_RTG_REQ`` (cmd 0x2532) → routing table
+          (destination short_addr + next-hop short_addr for every route
+          the dongle has discovered, including multi-hop mesh routes).
+
+        Returns a dict ``{"neighbours": [...], "routes": [...]}`` where
+        each entry is a short, human-readable string. The same data is
+        logged at INFO level so it shows up in the standard HA log even
+        without the integration in debug mode.
+        """
+        if not self._init_done:
+            await self.async_open()
+
+        neighbour_raw = await self.znp.request(
+            build_zdo_mgmt_lqi_request(dst_addr="0000", start_index=0)
+        )
+        route_raw = await self.znp.request(
+            build_zdo_mgmt_rtg_request(dst_addr="0000", start_index=0)
+        )
+
+        neighbours = _parse_zdo_mgmt_lqi_response(neighbour_raw)
+        routes = _parse_zdo_mgmt_rtg_response(route_raw)
+
+        _LOGGER.info(
+            "APS Zigbee discover — neighbours (%d):\n  %s",
+            len(neighbours),
+            "\n  ".join(neighbours) if neighbours else "(none)",
+        )
+        _LOGGER.info(
+            "APS Zigbee discover — routes (%d):\n  %s",
+            len(routes),
+            "\n  ".join(routes) if routes else "(none)",
+        )
+        return {"neighbours": neighbours, "routes": routes}
 
     async def async_rebind_inverter(self, serial: str) -> str:
         """Re-run the 4-frame pair handshake against an already-known inverter.
@@ -576,3 +628,126 @@ def _build_reading_dict(reading: DS3Reading, p1: float, p2: float, ptot: float) 
 
 def _utcnow() -> datetime:
     return datetime.now(tz=timezone.utc)
+
+
+def _iter_4xxx_payloads(burst_hex: str, cmd0: str, cmd1: str) -> list[str]:
+    """Return every `(cmd0, cmd1)` frame's payload hex from a raw ZNP burst.
+
+    Used to pick the `4531` and `4532` AREQ responses out of the burst that
+    SAPI emits in reply to a `2531` / `2532` request (which include the SRSP
+    + the actual AREQ, sometimes back-to-back).
+    """
+    out: list[str] = []
+    burst = burst_hex.upper()
+    target_cmd0 = cmd0.upper()
+    target_cmd1 = cmd1.upper()
+    i = 0
+    while i < len(burst):
+        if burst[i : i + 2] != "FE":
+            i += 2
+            continue
+        if i + 10 > len(burst):
+            break
+        try:
+            length = int(burst[i + 2 : i + 4], 16)
+        except ValueError:
+            i += 2
+            continue
+        payload_start = i + 8
+        payload_end = payload_start + 2 * length
+        if payload_end + 2 > len(burst):
+            break
+        if (
+            burst[i + 4 : i + 6] == target_cmd0
+            and burst[i + 6 : i + 8] == target_cmd1
+        ):
+            out.append(burst[payload_start:payload_end])
+        i = payload_end + 2  # skip the FCS byte
+    return out
+
+
+def _parse_zdo_mgmt_lqi_response(burst_hex: str) -> list[str]:
+    """Decode `ZDO_MGMT_LQI_RSP` (cmd 0x4531) entries from a raw ZNP burst.
+
+    Response payload layout (per TI Z-Stack ZNP API):
+        SrcAddr (2 LE)
+        Status (1)
+        NeighborTableEntries (1)
+        StartIndex (1)
+        NeighborLqiListCount (1)
+        N × entry of 22 bytes each:
+            ExtPanId (8)  ExtAddr (8)  NetworkAddr (2 LE)
+            TypeBytes (1) PermitJoining (1) Depth (1) LQI (1)
+
+    We surface only the fields useful to a human reader: the short address
+    in BE form and the LQI; plus the device type (`coordinator`, `router`,
+    `end_device`) extracted from the TypeBytes nibble.
+    """
+    entries: list[str] = []
+    for payload in _iter_4xxx_payloads(burst_hex, "45", "31"):
+        if len(payload) < 14:
+            continue
+        list_count = int(payload[12:14], 16)
+        cursor = 14
+        for _ in range(list_count):
+            if cursor + 44 > len(payload):
+                break
+            entry = payload[cursor : cursor + 44]
+            short_le = entry[32:36]
+            short_be = (short_le[2:4] + short_le[0:2]).upper()
+            type_byte = int(entry[36:38], 16)
+            dev_type = {0: "coordinator", 1: "router", 2: "end_device"}.get(
+                type_byte & 0x03, f"type_{type_byte & 0x03}"
+            )
+            depth = int(entry[40:42], 16)
+            lqi = int(entry[42:44], 16)
+            entries.append(
+                f"short={short_be} type={dev_type} depth={depth} lqi={lqi}"
+            )
+            cursor += 44
+    return entries
+
+
+def _parse_zdo_mgmt_rtg_response(burst_hex: str) -> list[str]:
+    """Decode `ZDO_MGMT_RTG_RSP` (cmd 0x4532) entries from a raw ZNP burst.
+
+    Response payload layout (per TI Z-Stack ZNP API):
+        SrcAddr (2 LE)
+        Status (1)
+        RoutingTableEntries (1)
+        StartIndex (1)
+        RoutingTableListCount (1)
+        N × entry of 5 bytes each:
+            DstAddr (2 LE)  StatusByte (1)  NextHop (2 LE)
+
+    Status byte low 3 bits = route state (active, discovery underway,
+    discovery failed, inactive, validation underway). The route state is
+    the key signal for distinguishing "we know how to reach X" vs
+    "discovery for X is in progress / failed".
+    """
+    states = {
+        0: "active",
+        1: "discovery_underway",
+        2: "discovery_failed",
+        3: "inactive",
+        4: "validation_underway",
+    }
+    entries: list[str] = []
+    for payload in _iter_4xxx_payloads(burst_hex, "45", "32"):
+        if len(payload) < 14:
+            continue
+        list_count = int(payload[12:14], 16)
+        cursor = 14
+        for _ in range(list_count):
+            if cursor + 10 > len(payload):
+                break
+            entry = payload[cursor : cursor + 10]
+            dst_le = entry[0:4]
+            dst_be = (dst_le[2:4] + dst_le[0:2]).upper()
+            status_byte = int(entry[4:6], 16)
+            state = states.get(status_byte & 0x07, f"state_{status_byte & 0x07}")
+            next_le = entry[6:10]
+            next_be = (next_le[2:4] + next_le[0:2]).upper()
+            entries.append(f"dst={dst_be} state={state} next_hop={next_be}")
+            cursor += 10
+    return entries

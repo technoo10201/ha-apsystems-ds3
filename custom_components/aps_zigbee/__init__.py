@@ -103,6 +103,7 @@ def _register_services(hass: HomeAssistant) -> None:
         ATTR_NAME,
         ATTR_SERIAL,
         DOMAIN,
+        SERVICE_DISCOVER,
         SERVICE_PAIR_INVERTER,
         SERVICE_REBOOT_INVERTER,
         SERVICE_REPOLL,
@@ -147,6 +148,11 @@ def _register_services(hass: HomeAssistant) -> None:
         except (KeyError, PollError) as err:
             raise HomeAssistantError(str(err)) from err
 
+    async def _discover(call: ServiceCall) -> None:
+        coordinator = _pick_coordinator()
+        await coordinator.async_discover()
+
     hass.services.async_register(DOMAIN, SERVICE_PAIR_INVERTER, _pair, schema=pair_schema)
     hass.services.async_register(DOMAIN, SERVICE_REPOLL, _repoll, schema=repoll_schema)
     hass.services.async_register(DOMAIN, SERVICE_REBOOT_INVERTER, _reboot, schema=reboot_schema)
+    hass.services.async_register(DOMAIN, SERVICE_DISCOVER, _discover)
