@@ -1,4 +1,4 @@
-# hacs-aps-ds3
+# APsystems DS3 — Home Assistant HACS plugin
 
 Home Assistant custom component that talks **directly** to a CC2530 USB-serial
 Zigbee dongle flashed with the proprietary **Kadsol** firmware
@@ -9,6 +9,12 @@ no cloud, no ESP32 bridge.
 > Repositories (see [HACS install](#hacs-install) below). The repo lives
 > on `main` (squash-merged from `develop`); active development continues
 > on `develop` and lands as future tagged releases.
+
+![Integration hub view — 5 DS3 inverters paired and reporting](img/screen_1.png)
+
+*The integration in Home Assistant after pairing 5 DS3 inverters — each
+inverter is its own device with 15 entities, fed live by a single CC2530
+dongle.*
 
 ---
 
@@ -356,6 +362,14 @@ You can also automate pairing via the service `aps_zigbee.pair_inverter`
 ---
 
 ## Entities exposed
+
+![Per-inverter device view in Home Assistant](img/screen_2.png)
+
+*One inverter's device page in HA: device info (model, manufacturer,
+serial), the **Refresh now** and **Reboot inverter** controls, and the
+full sensor list. Values show `Indisponible` at night — the inverter is
+unpowered (no sun, no PV), which is normal — see
+[Night-time behaviour](#night-time-behaviour) below.*
 
 For each paired inverter the integration creates a device with up to 13
 entities:
