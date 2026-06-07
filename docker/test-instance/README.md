@@ -48,8 +48,8 @@ cd ~/docker/ha-test-aps
 
 # Copy this directory's docker-compose.yml into place. Two ways:
 #   (a) clone the repo and copy:
-git clone https://github.com/technoo10201/hacs-aps-ds3.git /tmp/hacs-aps-ds3
-cp /tmp/hacs-aps-ds3/docker/test-instance/docker-compose.yml .
+git clone https://github.com/technoo10201/ha-apsystems-ds3.git /tmp/ha-apsystems-ds3
+cp /tmp/ha-apsystems-ds3/docker/test-instance/docker-compose.yml .
 
 #   (b) or just scp it from your laptop:
 # (on laptop) scp docker/test-instance/docker-compose.yml <server>:~/docker/ha-test-aps/

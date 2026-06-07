@@ -286,4 +286,4 @@ the contract `main.cpp` expects — keep those names.
 - Embedded firmware: `CC2530ZNP_2591-with-SBL.hex` from
   [`patience4711/read-APSystems-YC600-QS1-DS3`](https://github.com/patience4711/read-APSystems-YC600-QS1-DS3)
   (community mirror, see `cc25xx_firmware.zip`).
-- This sketch: MIT (same license as the parent `hacs-aps-ds3` repo).
+- This sketch: MIT (same license as the parent `ha-apsystems-ds3` repo).

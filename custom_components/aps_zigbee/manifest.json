@@ -5,8 +5,8 @@
     "config_flow": true,
     "integration_type": "hub",
     "iot_class": "local_polling",
-    "documentation": "https://github.com/technoo10201/hacs-aps-ds3",
-    "issue_tracker": "https://github.com/technoo10201/hacs-aps-ds3/issues",
+    "documentation": "https://github.com/technoo10201/ha-apsystems-ds3",
+    "issue_tracker": "https://github.com/technoo10201/ha-apsystems-ds3/issues",
     "codeowners": ["@technoo10201"],
     "requirements": ["pyserial-asyncio>=0.6"]
 }

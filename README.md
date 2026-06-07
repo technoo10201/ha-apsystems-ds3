@@ -220,8 +220,8 @@ the stack from a terminal with the bundled diagnostic CLI. It only needs the
 `pyserial-asyncio` Python package — same one Home Assistant will use.
 
 ```bash
-git clone git@github.com:technoo10201/hacs-aps-ds3.git
-cd hacs-aps-ds3
+git clone git@github.com:technoo10201/ha-apsystems-ds3.git
+cd ha-apsystems-ds3
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 # The wrapper auto-detects .venv and uses its Python.
@@ -314,7 +314,7 @@ post-v0.2.0).
 
 1. Open Home Assistant → **HACS** → top-right `⋮` menu → **Custom
    repositories**.
-2. Paste the repo URL: `https://github.com/technoo10201/hacs-aps-ds3`.
+2. Paste the repo URL: `https://github.com/technoo10201/ha-apsystems-ds3`.
 3. Pick category **Integration** → click **Add**.
 4. The "APsystems Zigbee (CC2530 direct)" card appears in the HACS list.
    Open it → **Download** → confirm the latest version → wait for HACS
@@ -538,8 +538,8 @@ The proprietary protocol is documented in
 ## Development
 
 ```bash
-git clone git@github.com:technoo10201/hacs-aps-ds3.git
-cd hacs-aps-ds3
+git clone git@github.com:technoo10201/ha-apsystems-ds3.git
+cd ha-apsystems-ds3
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/pytest          # 68 unit tests on the protocol layer
