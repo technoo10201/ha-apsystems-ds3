@@ -1,9 +1,15 @@
-"""Button platform — per-inverter Refresh + Reboot buttons.
+"""Button platform — per-inverter Refresh + Reboot + Re-bind buttons.
 
 Refresh triggers an on-demand poll of that single inverter (bypassing the
 backoff window) and pushes the result into the coordinator's data so the
 device's sensors update immediately. Reboot sends the proprietary reboot
-command (same effect as the `aps_zigbee.reboot_inverter` service).
+command (same effect as the `aps_zigbee.reboot_inverter` service). Re-bind
+replays the 4-frame APS pair handshake against the already-known
+(serial, inv_id) tuple — useful when the inverter's NWK route on the
+dongle has been wiped (post-`SYS_RESET`, dongle moved to a new host,
+prolonged offline period). The handshake uses broadcast `DstAddr=FFFF`
+at the MAC layer so it propagates through the Zigbee mesh — no need to
+physically move the dongle next to the inverter.
 """
 
 from __future__ import annotations
@@ -20,6 +26,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .aps_protocol.pairing import PairingError
 from .aps_protocol.polling import PollError
 from .aps_protocol.znp import ZNPError
 from .const import DOMAIN, INV_ID, INV_NAME, INV_SERIAL, MANUFACTURER, MODEL
@@ -34,7 +41,7 @@ if TYPE_CHECKING:
 class APSButtonDescription(ButtonEntityDescription):
     """Button description tagged with the action to perform."""
 
-    action: str  # "refresh" | "reboot"
+    action: str  # "refresh" | "reboot" | "rebind"
 
 
 _BUTTONS: tuple[APSButtonDescription, ...] = (
@@ -49,6 +56,12 @@ _BUTTONS: tuple[APSButtonDescription, ...] = (
         translation_key="reboot",
         action="reboot",
         device_class=ButtonDeviceClass.RESTART,
+    ),
+    APSButtonDescription(
+        key="rebind",
+        translation_key="rebind",
+        action="rebind",
+        icon="mdi:link-variant",
     ),
 )
 
@@ -98,7 +111,9 @@ class APSButton(ButtonEntity):
                 await self._coordinator.async_repoll_inverter(self._serial)
             elif action == "reboot":
                 await self._coordinator.async_reboot_inverter(self._serial)
+            elif action == "rebind":
+                await self._coordinator.async_rebind_inverter(self._serial)
             else:  # pragma: no cover - guarded by the descriptor enum
                 raise HomeAssistantError(f"unknown button action {action!r}")
-        except (PollError, ZNPError, KeyError) as err:
+        except (PairingError, PollError, ZNPError, KeyError) as err:
             raise HomeAssistantError(str(err)) from err

@@ -88,7 +88,8 @@
         },
         "button": {
             "refresh": {"name": "Refresh now"},
-            "reboot": {"name": "Reboot inverter"}
+            "reboot": {"name": "Reboot inverter"},
+            "rebind": {"name": "Re-bind"}
         }
     }
 }

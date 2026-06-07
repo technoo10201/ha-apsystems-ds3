@@ -228,6 +228,84 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
         await self.async_request_refresh()
         return inv_id
 
+    async def async_rebind_inverter(self, serial: str) -> str:
+        """Re-run the 4-frame pair handshake against an already-known inverter.
+
+        Use case: the inverter was added via the manual-invID path (no
+        handshake at registration time), or the dongle's NWK table got
+        wiped (SYS_RESET on first startup after dongle was moved to a new
+        host). In both cases the CC2530 doesn't have a route to the
+        inverter's short address, and unicast polls fail with timeout or
+        `AF_DATA_CONFIRM` status 0xCD (ZNwkNoRoute).
+
+        The pair handshake uses `DstAddr=FFFF` (broadcast) at the MAC
+        layer, so it propagates through the Zigbee mesh — the inverter
+        only needs to be reachable through *any* mesh hop, not directly
+        from the dongle. Its response carries its short address and
+        teaches the CC2530 the route automatically.
+
+        Returns the existing inv_id (preserved from the config entry).
+        Raises `PairingError` if the handshake doesn't get an answer.
+        """
+        inverter = next(
+            (
+                i
+                for i in self.entry.data.get(CONF_INVERTERS, [])
+                if i[INV_SERIAL] == serial
+            ),
+            None,
+        )
+        if inverter is None:
+            raise PairingError(f"unknown inverter serial {serial!r}")
+        expected_inv_id = inverter[INV_ID]
+
+        if not self._init_done:
+            await self.async_open()
+        if not await init_coordinator(self.znp, self._ecu_id, normal_ops=False):
+            raise PairingError("coordinator re-init failed before re-bind")
+        # Exclude all paired short addresses except this one's, so the
+        # extractor is allowed to return `expected_inv_id` if the inverter
+        # echoes its known address.
+        other_inv_ids = [
+            i[INV_ID]
+            for i in self.entry.data.get(CONF_INVERTERS, [])
+            if i[INV_SERIAL] != serial
+        ]
+        try:
+            observed_inv_id = await pair_inverter(
+                self.znp, serial, self._ecu_id, known_inv_ids=other_inv_ids
+            )
+        finally:
+            try:
+                await self.znp.request(build_no_command(self._ecu_id))
+            except ZNPError:
+                _LOGGER.debug(
+                    "post-rebind sendNO failed (will retry next cycle)"
+                )
+
+        await asyncio.sleep(2.0)
+
+        if observed_inv_id and observed_inv_id != expected_inv_id:
+            _LOGGER.warning(
+                "re-bind for %s returned inv_id %s but config has %s; "
+                "the inverter may have been re-paired against another ECU. "
+                "Updating the config entry to match the observed value.",
+                serial,
+                observed_inv_id,
+                expected_inv_id,
+            )
+            new_inverters = [
+                {**i, INV_ID: observed_inv_id} if i[INV_SERIAL] == serial else i
+                for i in self.entry.data.get(CONF_INVERTERS, [])
+            ]
+            self.hass.config_entries.async_update_entry(
+                self.entry,
+                data={**self.entry.data, CONF_INVERTERS: new_inverters},
+            )
+
+        await self.async_request_refresh()
+        return observed_inv_id or expected_inv_id
+
     async def async_register_inverter(
         self, serial: str, name: str, inv_id: str
     ) -> str:
