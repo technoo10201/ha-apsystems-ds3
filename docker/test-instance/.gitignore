@@ -1,0 +1,4 @@
+# Disposable HA config dir — created at first `docker compose up`.
+# Never commit it: it contains the secrets, tokens, registry, area names, etc.
+config/
+.env

@@ -1,0 +1,12 @@
+{
+    "domain": "aps_zigbee",
+    "name": "APsystems Zigbee (CC2530 direct)",
+    "version": "0.2.0",
+    "config_flow": true,
+    "integration_type": "hub",
+    "iot_class": "local_polling",
+    "documentation": "https://github.com/technoo10201/hacs-aps-ds3",
+    "issue_tracker": "https://github.com/technoo10201/hacs-aps-ds3/issues",
+    "codeowners": ["@technoo10201"],
+    "requirements": ["pyserial-asyncio>=0.6"]
+}

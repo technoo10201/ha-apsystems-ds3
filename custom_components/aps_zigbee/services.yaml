@@ -1,0 +1,41 @@
+pair_inverter:
+  name: Pair inverter
+  description: >-
+    Run the APsystems Zigbee pairing handshake for a new inverter, identified by
+    its 12-digit serial number printed on the device. Persists the result in
+    the integration config entry so the inverter is polled on the next cycle.
+  fields:
+    serial:
+      name: Serial number
+      description: The 12 decimal digits printed on the inverter label.
+      required: true
+      example: "408000158211"
+      selector:
+        text: {}
+    name:
+      name: Friendly name
+      description: Optional label displayed in Home Assistant (defaults to "APS DS3 <last 4 digits>").
+      required: false
+      example: Toit-est
+      selector:
+        text: {}
+
+repoll:
+  name: Re-poll inverters
+  description: >-
+    Force an immediate refresh cycle on all paired inverters, bypassing the
+    configured polling interval.
+
+reboot_inverter:
+  name: Reboot inverter
+  description: >-
+    Send the proprietary reboot command to a paired inverter. The inverter will
+    drop off the grid for a few seconds.
+  fields:
+    serial:
+      name: Serial number
+      description: Inverter to reboot, by its 12-digit serial number.
+      required: true
+      example: "408000158211"
+      selector:
+        text: {}

@@ -1,0 +1,33 @@
+# Disposable Home Assistant instance for testing the aps_zigbee integration.
+#
+#   Host port 8124  →  container port 8123 (so prod HA on 8123 keeps working).
+#   /dev/serial/by-id/...CH340... is mapped to /dev/ttyUSB0 inside the container
+#   so the config flow can take the plain `/dev/ttyUSB0` value.
+#
+# Copy this file to your server (e.g. ~/docker/ha-test-aps/docker-compose.yml),
+# adjust the device path below if your CH340 enumerates under a different name,
+# then `docker compose up -d`. See ./README.md for the full walkthrough.
+
+services:
+  homeassistant:
+    container_name: ha-test-aps
+    # Thin layer over HA stable that reinstalls numpy — see Dockerfile.
+    # Switch back to `image: ghcr.io/home-assistant/home-assistant:stable`
+    # if upstream fixes the bundled numpy.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ha-test-aps:latest
+    restart: unless-stopped
+    environment:
+      # Adjust to your timezone if Europe/Paris isn't the right one.
+      TZ: ${TZ:-Europe/Paris}
+    volumes:
+      - ./config:/config
+      - /etc/localtime:/etc/localtime:ro
+    devices:
+      # Map the host by-id symlink to a stable path inside the container.
+      # If your CH340 has a different by-id name, update the left side only.
+      - "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0:/dev/ttyUSB0"
+    ports:
+      - "8124:8123"

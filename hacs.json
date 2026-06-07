@@ -1,0 +1,7 @@
+{
+    "name": "APsystems Zigbee (CC2530 direct)",
+    "content_in_root": false,
+    "render_readme": true,
+    "zip_release": false,
+    "homeassistant": "2024.1.0"
+}

@@ -1,0 +1,119 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "APsystems Zigbee (CC2530 direct)",
+                "description": "Select the USB serial port the CC2530 dongle is connected to, then keep the default ECU id unless you have already paired inverters with a different one.",
+                "data": {
+                    "port": "Serial port",
+                    "ecu_id": "ECU id (12 hex chars)",
+                    "scan_interval": "Polling interval (seconds)",
+                    "dtr_reset": "Hard-reset the CC2530 via DTR at startup"
+                },
+                "data_description": {
+                    "dtr_reset": "Leave on if your USB-TTL bridge's DTR pin is wired to the CC2530 RESET (typical reference build with CH340E + bare module). Turn off if DTR is left floating."
+                }
+            }
+        },
+        "error": {
+            "invalid_port": "A serial port is required.",
+            "invalid_ecu_id": "ECU id must be exactly 12 hexadecimal characters.",
+            "cannot_connect": "Cannot open the serial port — is the dongle plugged in and not used by ZHA / Zigbee2MQTT?"
+        },
+        "abort": {
+            "already_configured": "This serial port is already configured."
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "APS Zigbee — options",
+                "menu_options": {
+                    "add_inverter": "Pair a new inverter",
+                    "remove_inverter": "Forget a paired inverter",
+                    "settings": "Polling interval"
+                }
+            },
+            "settings": {
+                "title": "Polling interval",
+                "data": {
+                    "scan_interval": "Polling interval (seconds)"
+                }
+            },
+            "add_inverter": {
+                "title": "Pair a new inverter",
+                "description": "Enter the 12-digit serial number printed on the inverter. The handshake will run live against the dongle.\n\n**Bring the dongle physically next to the inverter you are pairing.** The inverter does not yet know your Zigbee mesh, so it can only answer the pair handshake by direct radio. Once pairing succeeds you can move the dongle back to its permanent location — already-paired inverters will relay traffic for the new one via Zigbee mesh routing, so a single dongle is enough to cover an installation spread across rooms or floors.",
+                "data": {
+                    "serial": "Serial number (12 digits)",
+                    "name": "Friendly name (optional)"
+                }
+            },
+            "remove_inverter": {
+                "title": "Forget an inverter",
+                "data": {
+                    "serial": "Inverter"
+                }
+            }
+        },
+        "error": {
+            "invalid_serial": "Serial number must be exactly 12 digits.",
+            "already_paired": "This inverter is already paired.",
+            "pairing_failed": "The inverter did not respond to the pairing handshake.",
+            "not_loaded": "Integration is not loaded — restart Home Assistant and retry."
+        },
+        "abort": {
+            "no_inverters": "There are no paired inverters to remove."
+        }
+    },
+    "services": {
+        "pair_inverter": {
+            "name": "Pair inverter",
+            "description": "Run the proprietary pairing handshake for a new inverter and persist it.",
+            "fields": {
+                "serial": {
+                    "name": "Serial number",
+                    "description": "12 digits printed on the inverter label."
+                },
+                "name": {
+                    "name": "Friendly name",
+                    "description": "Optional Home Assistant label."
+                }
+            }
+        },
+        "repoll": {
+            "name": "Re-poll inverters",
+            "description": "Force an immediate refresh of all paired inverters."
+        },
+        "reboot_inverter": {
+            "name": "Reboot inverter",
+            "description": "Send the proprietary reboot command to a paired inverter.",
+            "fields": {
+                "serial": {
+                    "name": "Serial number",
+                    "description": "Inverter to reboot."
+                }
+            }
+        }
+    },
+    "entity": {
+        "sensor": {
+            "vdc1": {"name": "DC voltage panel 1"},
+            "vdc2": {"name": "DC voltage panel 2"},
+            "idc1": {"name": "DC current panel 1"},
+            "idc2": {"name": "DC current panel 2"},
+            "power_p1": {"name": "Power panel 1"},
+            "power_p2": {"name": "Power panel 2"},
+            "power_total": {"name": "Power total"},
+            "energy_p1": {"name": "Energy panel 1"},
+            "energy_p2": {"name": "Energy panel 2"},
+            "acv": {"name": "AC voltage"},
+            "frequency": {"name": "Grid frequency"},
+            "temperature": {"name": "Temperature"},
+            "signal_quality": {"name": "Zigbee signal quality"}
+        },
+        "button": {
+            "refresh": {"name": "Refresh now"},
+            "reboot": {"name": "Reboot inverter"}
+        }
+    }
+}

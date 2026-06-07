@@ -1,0 +1,89 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "APsystems Zigbee (CC2530 direct)",
+                "description": "Sélectionne le port série USB sur lequel est branchée la clé CC2530, puis garde l'ECU id par défaut sauf si tes onduleurs sont déjà appairés avec un autre.",
+                "data": {
+                    "port": "Port série",
+                    "ecu_id": "ECU id (12 caractères hex)",
+                    "scan_interval": "Intervalle de polling (secondes)",
+                    "dtr_reset": "Reset matériel du CC2530 via DTR au démarrage"
+                },
+                "data_description": {
+                    "dtr_reset": "Laisse activé si la broche DTR de ton pont USB-TTL est reliée au RESET du CC2530 (montage de référence CH340E + module nu). Désactive si DTR n'est pas câblée."
+                }
+            }
+        },
+        "error": {
+            "invalid_port": "Un port série est requis.",
+            "invalid_ecu_id": "L'ECU id doit faire exactement 12 caractères hexadécimaux.",
+            "cannot_connect": "Impossible d'ouvrir le port série — la clé est-elle bien branchée et non utilisée par ZHA / Zigbee2MQTT ?"
+        },
+        "abort": {
+            "already_configured": "Ce port série est déjà configuré."
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "APS Zigbee — options",
+                "menu_options": {
+                    "add_inverter": "Appairer un nouvel onduleur",
+                    "remove_inverter": "Oublier un onduleur",
+                    "settings": "Intervalle de polling"
+                }
+            },
+            "settings": {
+                "title": "Intervalle de polling",
+                "data": {
+                    "scan_interval": "Intervalle de polling (secondes)"
+                }
+            },
+            "add_inverter": {
+                "title": "Appairer un nouvel onduleur",
+                "description": "Saisis le numéro de série à 12 chiffres imprimé sur l'onduleur. Le handshake s'exécute en direct sur la clé.\n\n**Rapproche physiquement la clé de l'onduleur que tu veux appairer.** L'onduleur ne connaît pas encore ton mesh Zigbee, il ne peut répondre au handshake que par radio directe. Une fois l'appairage réussi tu peux remettre la clé à sa place habituelle — les onduleurs déjà appariés relayeront le trafic du nouveau via le routage mesh Zigbee, une seule clé suffit donc à couvrir une installation répartie entre plusieurs pièces ou étages.",
+                "data": {
+                    "serial": "Numéro de série (12 chiffres)",
+                    "name": "Nom convivial (optionnel)"
+                }
+            },
+            "remove_inverter": {
+                "title": "Oublier un onduleur",
+                "data": {
+                    "serial": "Onduleur"
+                }
+            }
+        },
+        "error": {
+            "invalid_serial": "Le numéro de série doit faire exactement 12 chiffres.",
+            "already_paired": "Cet onduleur est déjà appairé.",
+            "pairing_failed": "L'onduleur n'a pas répondu au handshake d'appairage.",
+            "not_loaded": "L'intégration n'est pas chargée — redémarre Home Assistant et réessaie."
+        },
+        "abort": {
+            "no_inverters": "Aucun onduleur à oublier."
+        }
+    },
+    "entity": {
+        "sensor": {
+            "vdc1": {"name": "Tension DC panneau 1"},
+            "vdc2": {"name": "Tension DC panneau 2"},
+            "idc1": {"name": "Courant DC panneau 1"},
+            "idc2": {"name": "Courant DC panneau 2"},
+            "power_p1": {"name": "Puissance panneau 1"},
+            "power_p2": {"name": "Puissance panneau 2"},
+            "power_total": {"name": "Puissance totale"},
+            "energy_p1": {"name": "Énergie panneau 1"},
+            "energy_p2": {"name": "Énergie panneau 2"},
+            "acv": {"name": "Tension AC"},
+            "frequency": {"name": "Fréquence réseau"},
+            "temperature": {"name": "Température"},
+            "signal_quality": {"name": "Qualité signal Zigbee"}
+        },
+        "button": {
+            "refresh": {"name": "Rafraîchir maintenant"},
+            "reboot": {"name": "Redémarrer l'onduleur"}
+        }
+    }
+}

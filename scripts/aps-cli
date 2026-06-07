@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Convenience wrapper for the diagnostic CLI.
+# Usage:  scripts/aps-cli <subcommand> [...]
+# Sets PYTHONPATH to the repo root so the package is importable from anywhere.
+set -euo pipefail
+
+script_dir=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+repo_root=$(dirname "$script_dir")
+
+# Prefer the repo-local virtualenv if it exists, otherwise the active Python.
+if [[ -x "$repo_root/.venv/bin/python" ]]; then
+    python_bin="$repo_root/.venv/bin/python"
+else
+    python_bin="${PYTHON:-python3}"
+fi
+
+exec env PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}" \
+    "$python_bin" -m custom_components.aps_zigbee.aps_protocol.cli "$@"
