@@ -68,29 +68,31 @@ What matters:
 
 ### 3. Programmer (one-shot, for the initial flash)
 
-Three options, in increasing order of cost-effectiveness if you don't
-already own dedicated hardware:
+A **~ 4–5 € ESP32-C3 dev board** from AliExpress. Native 3.3 V GPIOs
+match the CC2530 logic level exactly — no level shifter, no USB-UART
+adapter, no TI tooling. Compatible with any ESP32-C3 variant (DevKit M,
+Super Mini, XIAO ESP32-C3, …); pinout is configurable in
+`platformio.ini`.
 
-- **ESP32-C3 dev board** (~ 4–5 € on AliExpress) — runs the bundled
-  standalone flasher at [`tools/cc2530-flasher/`](./tools/cc2530-flasher/).
-  PlatformIO project, Kadsol firmware embedded in the binary, armed-mode
-  protection (the CC2530 keeps running normally unless you type `FLASH`
-  on the serial console). Three GPIOs to wire (DD / DC / RESET) plus
-  3 V3 / GND. Native 3.3 V GPIOs on the ESP32-C3 match the CC2530 logic
-  level exactly — no level shifter. Compatible with any ESP32-C3 variant
-  (DevKit M, Super Mini, XIAO ESP32-C3, …); pinout is configurable in
-  `platformio.ini`. **Bonus:** you can leave the ESP32-C3 wired
-  permanently, then re-flash the CC2530 over SSH whenever you need to.
-- **TI CC Debugger** (cleanest, ~ 10–15 € on AliExpress) — official TI tool,
-  works with every existing flasher. Connects through a 10-pin ribbon broken
-  out to 5 wires: `DD`, `DC`, `RESET`, `VCC`, `GND`.
-- **Raspberry Pi GPIO** (free if you already have a Pi) — uses the
-  [`CCLib`](https://github.com/wavesoft/CCLib) Arduino/RPi sketch as a
-  software CC Debugger replacement. Slower but no extra hardware to buy.
+The bundled standalone flasher at
+[`tools/cc2530-flasher/`](./tools/cc2530-flasher/) is a PlatformIO
+project that embeds the Kadsol firmware in the ESP32 binary. Once the
+ESP32-C3 has the sketch, the rest is `pio device monitor`, type `FLASH`,
+watch the LED turn green. Armed-mode protection: the CC2530 keeps
+running normally unless you explicitly send `FLASH` on the serial
+console, so an accidental ESP32 reboot can never wipe the dongle.
 
-Whichever route you pick, you only need the programmer once; you can
-borrow one and never own it. The ESP32-C3 path is documented end-to-end
-below at **Step 2d**.
+You only need the ESP32-C3 once for the initial flash — but if you
+leave it wired permanently you can re-flash the CC2530 over SSH any
+time. Step-by-step procedure below at **Step 2**.
+
+> Other community paths exist (TI CC Debugger via
+> [`cc-tool`](https://github.com/dashesy/cc-tool), Raspberry Pi GPIO via
+> [`jmichault/flash_cc2531`](https://github.com/jmichault/flash_cc2531),
+> Arduino + [`CCLib`](https://github.com/wavesoft/CCLib)) — they all
+> drive the same CC2530 debug protocol. They are not documented in this
+> repo because they have not been tested as part of this project; reach
+> for them only if you already own and know the hardware.
 
 ### Bonus tip — CC2591 PA power rail
 
@@ -108,25 +110,10 @@ current.
 
 ## Wiring
 
-### A. For flashing (CC Debugger ↔ module)
+For the **flashing wiring** (ESP32-C3 ↔ CC2530 debug pins) see
+[`tools/cc2530-flasher/README.md`](./tools/cc2530-flasher/).
 
-```
-   CC Debugger 10-pin            CC2530+CC2591 module
-   ┌──┬──┬──┬──┬──┐              ┌────────────────────┐
-   │  │  │  │  │  │              │  GND  VCC  DD  DC  R │
-   │ DD DC R V G │  ───────►    │   │    │   │   │  │ │
-   └────────────┘                 └────────────────────┘
-   DD  → DD     (P2_1)
-   DC  → DC     (P2_2)
-   R   → RST    (RESETn, active low)
-   V   → VCC    (3.3 V)
-   G   → GND
-```
-
-Exact silk-screen labels vary per board; check yours against the CC2530
-datasheet pinout (P2_1 = Debug Data, P2_2 = Debug Clock).
-
-### B. For everyday operation (USB-TTL ↔ module)
+For **everyday operation** (USB-TTL ↔ module):
 
 ```
    USB-TTL 3.3 V                CC2530+CC2591 module
@@ -160,69 +147,16 @@ The Kadsol build is `CC2530ZNP-with-SBL.hex`. Convenient mirrors:
 
 Extract the archive; you want the `.hex` file (not the `.bin` companion).
 
-### Step 2a — Flash with `cc-tool` (Linux, recommended)
+### Step 2 — Flash from an ESP32-C3 — *tested*
 
-`cc-tool` is the open-source CLI for the TI CC Debugger.
-
-```bash
-sudo apt install cc-tool   # Debian/Ubuntu/HA OS supervised host
-# OR
-brew install cc-tool       # macOS via Homebrew
-```
-
-Plug in the CC Debugger, hold the small button on it (some clones don't have
-one — just plug it), then:
-
-```bash
-# Erase + write + verify in one go.
-sudo cc-tool -e -w CC2530ZNP-with-SBL.hex -v
-```
-
-A successful run prints something like:
-
-```
-Programmer: CC Debugger
-Target: CC2530
-  Erasing flash...
-  Writing flash (262144 bytes)...
-  Verifying flash...
-  Done.
-```
-
-### Step 2b — Flash with SmartRF Flash Programmer (Windows)
-
-1. Download the **SmartRF Flash Programmer v1** (not v2 — v2 has dropped CC2530
-   support) from [ti.com](https://www.ti.com/tool/FLASH-PROGRAMMER).
-2. Install + reboot. The CC Debugger driver is bundled.
-3. Open the app, plug the CC Debugger, click *System-on-Chip* in the left tab,
-   pick `CC2530`, point *Flash image* at `CC2530ZNP-with-SBL.hex`, tick
-   *Erase, program, verify* → **Perform actions**.
-
-### Step 2c — Flash from a Raspberry Pi GPIO (no CC Debugger) — *tested*
-
-This is how the reference build was flashed. Wire four Pi GPIOs to the module
-(`DD`, `DC`, `RST`, plus `VCC` / `GND`) and drive the flashing from the Pi
-itself with [`jmichault/flash_cc2531`](https://github.com/jmichault/flash_cc2531).
-
-Follow the French walkthrough on
-[jmichault.github.io/flash_cc2531-dok/fr](https://jmichault.github.io/flash_cc2531-dok/fr/)
-— despite the `cc2531` in the name, the tool flashes the CC2530 too (same
-debug protocol, same chip family). The doc covers wiring, software install on
-Raspberry Pi OS, and the actual erase/write/verify commands.
-
-> If you don't own a Pi, [`CCLib`](https://github.com/wavesoft/CCLib) works on
-> an Arduino in the same role; the `flash_cc2531` README also links to it.
-
-### Step 2d — Flash from an ESP32-C3 (no CC Debugger, no Pi) — *tested*
-
-This is the cheapest path if you don't already own a CC Debugger or a Pi:
-a ~ 4–5 € ESP32-C3 dev board acts as a software CC Debugger.
+A ~ 4–5 € ESP32-C3 dev board acts as a software CC Debugger, with the
+Kadsol firmware embedded directly in the ESP32 binary. No TI tools, no
+CC Debugger, no Raspberry Pi.
 
 The complete PlatformIO project is bundled in this repo at
-[`tools/cc2530-flasher/`](./tools/cc2530-flasher/). It embeds the Kadsol
-firmware directly in the ESP32 binary, so once the ESP32 has the sketch
-no host-side TI tooling is needed for flashing — `pio device monitor`,
-type `FLASH`, watch the LED turn green.
+[`tools/cc2530-flasher/`](./tools/cc2530-flasher/). Once the ESP32-C3
+has the sketch, the rest is `pio device monitor`, type `FLASH`, watch
+the LED turn green.
 
 ```
 ESP32-C3                   CC2530 + CC2591
@@ -256,7 +190,9 @@ regenerating the embedded firmware blob from a different `.hex`).
 
 ### Step 3 — Verify
 
-After flashing, unplug the CC Debugger, connect the USB-TTL bridge, and
+After flashing, disconnect the ESP32-C3's 3 V3 rail from the CC2530 (or
+unwire it completely if you don't plan to leave it in for remote
+re-flashing), connect the USB-TTL bridge for everyday operation, and
 sanity-check the module from a terminal:
 
 ```bash
