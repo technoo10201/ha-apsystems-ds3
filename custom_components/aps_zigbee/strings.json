@@ -42,10 +42,14 @@
             },
             "add_inverter": {
                 "title": "Pair a new inverter",
-                "description": "Enter the 12-digit serial number printed on the inverter. The handshake will run live against the dongle.\n\n**Bring the dongle physically next to the inverter you are pairing.** The inverter does not yet know your Zigbee mesh, so it can only answer the pair handshake by direct radio. Once pairing succeeds you can move the dongle back to its permanent location — already-paired inverters will relay traffic for the new one via Zigbee mesh routing, so a single dongle is enough to cover an installation spread across rooms or floors.",
+                "description": "Enter the 12-digit serial number printed on the inverter. The handshake will run live against the dongle.\n\n**Bring the dongle physically next to the inverter you are pairing.** The inverter does not yet know your Zigbee mesh, so it can only answer the pair handshake by direct radio. Once pairing succeeds you can move the dongle back to its permanent location — already-paired inverters will relay traffic for the new one via Zigbee mesh routing, so a single dongle is enough to cover an installation spread across rooms or floors.\n\n**Already know the inverter's Zigbee short address?** Fill in the optional *Manual Zigbee short address* field below — the plugin will skip the handshake and trust the value. Useful when the inverter was paired before with the same dongle (the firmware-level binding persists across host moves).",
                 "data": {
                     "serial": "Serial number (12 digits)",
-                    "name": "Friendly name (optional)"
+                    "name": "Friendly name (optional)",
+                    "inv_id": "Manual Zigbee short address (4 hex chars, optional)"
+                },
+                "data_description": {
+                    "inv_id": "Leave empty to run the live pair handshake. Fill in only if you already know the 4-hex-char short address (e.g. B5AF) from a previous pair against this same dongle — the plugin will skip the handshake and persist the mapping directly."
                 }
             },
             "remove_inverter": {
@@ -57,6 +61,7 @@
         },
         "error": {
             "invalid_serial": "Serial number must be exactly 12 digits.",
+            "invalid_inv_id": "Manual Zigbee short address must be exactly 4 hexadecimal characters (e.g. B5AF) and must not be 0000, FFFF, the ECU's own short address, or one already used by another paired inverter.",
             "already_paired": "This inverter is already paired.",
             "pairing_failed": "The inverter did not respond to the pairing handshake.",
             "not_loaded": "Integration is not loaded — restart Home Assistant and retry."

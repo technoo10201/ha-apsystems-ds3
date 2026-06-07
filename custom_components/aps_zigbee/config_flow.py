@@ -45,6 +45,7 @@ if TYPE_CHECKING:
 
 _ECU_RE = re.compile(r"^[0-9A-Fa-f]{12}$")
 _SERIAL_RE = re.compile(r"^\d{12}$")
+_INV_ID_RE = re.compile(r"^[0-9A-Fa-f]{4}$")
 
 
 class APSConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -160,27 +161,37 @@ class APSOptionsFlow(OptionsFlow):
         if user_input is not None:
             serial = user_input[INV_SERIAL].strip()
             name = (user_input.get(CONF_NAME) or "").strip()
+            manual_inv_id = (user_input.get(INV_ID) or "").strip().upper()
             if not _SERIAL_RE.match(serial):
                 errors[INV_SERIAL] = "invalid_serial"
             elif any(i[INV_SERIAL] == serial for i in self.entry.data.get(CONF_INVERTERS, [])):
                 errors[INV_SERIAL] = "already_paired"
+            elif manual_inv_id and not _INV_ID_RE.match(manual_inv_id):
+                errors[INV_ID] = "invalid_inv_id"
             else:
                 coordinator = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id)
                 if coordinator is None:
                     errors["base"] = "not_loaded"
                 else:
+                    friendly = name or f"APS DS3 {serial[-4:]}"
                     try:
-                        await coordinator.async_pair_new_inverter(
-                            serial, name or f"APS DS3 {serial[-4:]}"
-                        )
+                        if manual_inv_id:
+                            await coordinator.async_register_inverter(
+                                serial, friendly, manual_inv_id
+                            )
+                        else:
+                            await coordinator.async_pair_new_inverter(serial, friendly)
                     except PairingError:
                         errors["base"] = "pairing_failed"
+                    except ValueError:
+                        errors[INV_ID] = "invalid_inv_id"
                     else:
                         return self.async_create_entry(title="", data=self.entry.options)
         schema = vol.Schema(
             {
                 vol.Required(INV_SERIAL): selector.TextSelector(),
                 vol.Optional(CONF_NAME, default=""): selector.TextSelector(),
+                vol.Optional(INV_ID, default=""): selector.TextSelector(),
             }
         )
         return self.async_show_form(step_id="add_inverter", data_schema=schema, errors=errors)

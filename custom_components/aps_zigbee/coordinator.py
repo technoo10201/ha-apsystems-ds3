@@ -36,7 +36,11 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .aps_protocol.coordinator import check_coordinator, init_coordinator
 from .aps_protocol.decode_ds3 import DS3Reading, derive_power
 from .aps_protocol.frames import build_no_command
-from .aps_protocol.pairing import PairingError, pair_inverter
+from .aps_protocol.pairing import (
+    PairingError,
+    _build_invid_blacklist,
+    pair_inverter,
+)
 from .aps_protocol.polling import PollError, poll_inverter, reboot_inverter
 from .aps_protocol.runtime import InverterRuntime, InverterState
 from .aps_protocol.znp import ZNP, ZNPError
@@ -215,6 +219,50 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
         # to the inverter. Mirrors test_local/main.py:52 (3 s) and
         # aps_yc600.py:486 (1 s).
         await asyncio.sleep(2.0)
+
+        new_inverters = list(self.entry.data.get(CONF_INVERTERS, []))
+        new_inverters.append({INV_SERIAL: serial, INV_ID: inv_id, INV_NAME: name})
+        self.hass.config_entries.async_update_entry(
+            self.entry, data={**self.entry.data, CONF_INVERTERS: new_inverters}
+        )
+        await self.async_request_refresh()
+        return inv_id
+
+    async def async_register_inverter(
+        self, serial: str, name: str, inv_id: str
+    ) -> str:
+        """Persist (serial, inv_id) without running the live pair handshake.
+
+        Useful when the inverter is already firmware-bound to this ECU — e.g.
+        previously paired on another host with the same dongle / same ECU id.
+        The binding lives in the inverter's flash and survives the dongle
+        move; the plugin just needs the (serial, inv_id) mapping to start
+        polling. Skipping the handshake also avoids the antenna-proximity
+        constraint that the regular pair flow needs (see the warning in the
+        add_inverter description).
+
+        Validation mirrors the dynamic blacklist `pair_inverter` uses on the
+        extraction side: 4-hex-char format, not `0000`/`FFFF`, not the ECU's
+        own short address, not already in use by another paired inverter.
+        Raises `ValueError` if the inv_id is malformed or reserved.
+        """
+        inv_id = inv_id.strip().upper()
+        if len(inv_id) != 4 or any(c not in "0123456789ABCDEF" for c in inv_id):
+            raise ValueError(f"invalid inv_id {inv_id!r}; expected 4 hex chars")
+        if any(
+            i[INV_SERIAL] == serial
+            for i in self.entry.data.get(CONF_INVERTERS, [])
+        ):
+            raise PairingError(f"inverter {serial} is already paired")
+        existing_inv_ids = [
+            i[INV_ID] for i in self.entry.data.get(CONF_INVERTERS, [])
+        ]
+        blacklist = _build_invid_blacklist(self._ecu_id, existing_inv_ids)
+        if inv_id in blacklist:
+            raise ValueError(
+                f"inv_id {inv_id!r} is reserved (broadcast / ECU short addr / "
+                "already in use)"
+            )
 
         new_inverters = list(self.entry.data.get(CONF_INVERTERS, []))
         new_inverters.append({INV_SERIAL: serial, INV_ID: inv_id, INV_NAME: name})
