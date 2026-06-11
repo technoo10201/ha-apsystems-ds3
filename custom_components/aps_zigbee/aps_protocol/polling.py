@@ -26,11 +26,30 @@ class PollError(Exception):
     """The dongle did not return a decodable inverter frame."""
 
 
-async def poll_inverter(znp: ZNP, inv_id: str, ecu_id: str) -> DS3Reading:
+class SerialMismatchError(PollError):
+    """The inverter that answered is not the one the config maps to this inv_id.
+
+    Every AF_INCOMING_MSG carries the responding inverter's own serial
+    (`decode_ds3.DS3Reading.serial`). When it differs from the serial the
+    config entry associates with the polled short address, the (serial ↔
+    inv_id) mapping is wrong — typically two inverters swapped during manual
+    invID entry. Silently accepting the frame would cross-attribute the
+    production data between the two units.
+    """
+
+
+async def poll_inverter(
+    znp: ZNP,
+    inv_id: str,
+    ecu_id: str,
+    expected_serial: str | None = None,
+) -> DS3Reading:
     """Send a polling request to `inv_id` and decode the answer.
 
     Raises `PollError` if the burst is missing one of the success markers or
-    the DS3 decoder cannot parse the AF_INCOMING_MSG body.
+    the DS3 decoder cannot parse the AF_INCOMING_MSG body, and
+    `SerialMismatchError` if `expected_serial` is given and the responding
+    inverter reports a different serial.
     """
     cmd = build_poll_command(inv_id, ecu_id)
     try:
@@ -47,9 +66,16 @@ async def poll_inverter(znp: ZNP, inv_id: str, ecu_id: str) -> DS3Reading:
     if _AF_INCOMING_PREFIX not in burst_u:
         raise PollError("no AF_INCOMING_MSG in burst")
     try:
-        return decode_ds3_frame(burst_u)
+        reading = decode_ds3_frame(burst_u)
     except DS3DecodeError as err:
         raise PollError(f"DS3 decoder rejected the frame: {err}") from err
+    if expected_serial is not None and reading.serial != expected_serial:
+        raise SerialMismatchError(
+            f"inverter at {inv_id} answered with serial {reading.serial}, "
+            f"expected {expected_serial} — check the (serial ↔ invID) mapping "
+            "of these two inverters in the integration config"
+        )
+    return reading
 
 
 async def reboot_inverter(znp: ZNP, inv_id: str, ecu_id: str) -> None:

@@ -45,7 +45,12 @@ from .aps_protocol.pairing import (
     _build_invid_blacklist,
     pair_inverter,
 )
-from .aps_protocol.polling import PollError, poll_inverter, reboot_inverter
+from .aps_protocol.polling import (
+    PollError,
+    SerialMismatchError,
+    poll_inverter,
+    reboot_inverter,
+)
 from .aps_protocol.runtime import (
     InverterRuntime,
     InverterState,
@@ -167,7 +172,9 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
         now = _utcnow()
         data: dict[str, dict[str, Any]] = dict(self.data or {})
         try:
-            reading = await poll_inverter(self.znp, inv[INV_ID], self._ecu_id)
+            reading = await poll_inverter(
+                self.znp, inv[INV_ID], self._ecu_id, expected_serial=serial
+            )
         except (PollError, ZNPError) as err:
             _LOGGER.warning("on-demand poll failed for %s: %s", serial, err)
             runtime.record_failure(
@@ -477,9 +484,18 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
                 continue
 
             try:
-                reading = await poll_inverter(self.znp, inv_id, self._ecu_id)
+                reading = await poll_inverter(
+                    self.znp, inv_id, self._ecu_id, expected_serial=serial
+                )
             except (PollError, ZNPError) as err:
-                _LOGGER.debug("poll failed for %s (%s): %s", serial, inv_id, err)
+                # A serial mismatch is a configuration error (swapped invIDs),
+                # not a radio hiccup — surface it loudly instead of at debug.
+                log = (
+                    _LOGGER.warning
+                    if isinstance(err, SerialMismatchError)
+                    else _LOGGER.debug
+                )
+                log("poll failed for %s (%s): %s", serial, inv_id, err)
                 runtime.record_failure(
                     now,
                     sun_is_up=sun_is_up,
