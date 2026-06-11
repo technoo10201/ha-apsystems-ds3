@@ -17,6 +17,7 @@ from custom_components.aps_zigbee.aps_protocol.frames import (
     build_poll_command,
     build_reboot_command,
     ecu_id_reverse,
+    extract_route,
 )
 
 
@@ -93,3 +94,47 @@ def test_pair_commands_validate_serial() -> None:
         build_pair_commands("not12digits", DEFAULT_ECU_ID)
     with pytest.raises(ValueError):
         build_pair_commands("4080001582AB", DEFAULT_ECU_ID)
+
+
+# ---------------------------------------------------------------------------
+# extract_route — ZDO_SRC_RTG_IND (0x45C4) parsing
+# ---------------------------------------------------------------------------
+# The fixtures below are verbatim 45C4 frames captured on the production
+# dongle (2026-06-11): a 2-relay route to E477, a 1-relay route to E1ED and
+# a direct (0-relay) route to B5AF.
+
+
+def test_extract_route_two_relays() -> None:
+    burst = "FE0164010064FE0745C477E402EDE1AFB501FE7D44810000060177E41414AABB"
+    assert extract_route(burst, "E477") == ["E1ED", "B5AF"]
+
+
+def test_extract_route_direct_link_is_empty_list() -> None:
+    burst = "FE0164010064FE0345C4AFB50098FE7D448100000601AFB51414AABB"
+    assert extract_route(burst, "B5AF") == []
+
+
+def test_extract_route_absent_returns_none() -> None:
+    burst = "FE0164010064FE034480001401D2"
+    assert extract_route(burst, "E477") is None
+
+
+def test_extract_route_ignores_other_destinations() -> None:
+    # Route indication for E477 must not leak onto a poll of B5AF.
+    burst = "FE0745C477E402EDE1AFB501"
+    assert extract_route(burst, "B5AF") is None
+
+
+def test_extract_route_last_indication_wins() -> None:
+    burst = (
+        "FE0745C477E402EDE1AFB501"   # first: 2 relays
+        "FE0545C477E401EDE10F"       # then: route shortened to 1 relay
+    )
+    assert extract_route(burst, "E477") == ["E1ED"]
+
+
+def test_extract_route_rejects_payload_lookalike() -> None:
+    # "45C4" appearing inside another frame's payload (no FE LEN prefix)
+    # must not be parsed as a route.
+    burst = "FE7D44810000060145C477E402EDE1AFB501AABB"
+    assert extract_route(burst, "E477") is None

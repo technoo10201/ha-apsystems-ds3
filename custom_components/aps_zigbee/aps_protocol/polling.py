@@ -7,9 +7,10 @@ sanity checks taken from `AAA_DECODE.ino:34-64` and the stateless DS3 decoder.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 
 from .decode_ds3 import DS3DecodeError, DS3Reading, decode_ds3_frame
-from .frames import build_poll_command, build_reboot_command
+from .frames import build_poll_command, build_reboot_command, extract_route
 from .znp import ZNP, ZNPError
 
 _LOGGER = logging.getLogger(__name__)
@@ -38,12 +39,26 @@ class SerialMismatchError(PollError):
     """
 
 
+@dataclass(frozen=True, slots=True)
+class PollResult:
+    """A decoded poll answer plus the mesh route the dongle reported.
+
+    `relays` mirrors `frames.extract_route`: short addresses (human form) of
+    the intermediate routers, `[]` for a direct radio link, `None` when the
+    burst carried no `ZDO_SRC_RTG_IND` for this poll (the firmware does not
+    emit one every time — keep the previous value in that case).
+    """
+
+    reading: DS3Reading
+    relays: list[str] | None = field(default=None)
+
+
 async def poll_inverter(
     znp: ZNP,
     inv_id: str,
     ecu_id: str,
     expected_serial: str | None = None,
-) -> DS3Reading:
+) -> PollResult:
     """Send a polling request to `inv_id` and decode the answer.
 
     Raises `PollError` if the burst is missing one of the success markers or
@@ -75,7 +90,7 @@ async def poll_inverter(
             f"expected {expected_serial} — check the (serial ↔ invID) mapping "
             "of these two inverters in the integration config"
         )
-    return reading
+    return PollResult(reading=reading, relays=extract_route(burst_u, inv_id))
 
 
 async def reboot_inverter(znp: ZNP, inv_id: str, ecu_id: str) -> None:

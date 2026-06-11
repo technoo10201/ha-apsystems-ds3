@@ -245,12 +245,16 @@ async def _poll_once(
     znp: ZNP, inv_id: str, ecu_id: str, json_out: bool, previous: DS3Reading | None = None
 ) -> int:
     try:
-        reading = await poll_inverter(znp, inv_id, ecu_id)
+        result = await poll_inverter(znp, inv_id, ecu_id)
     except PollError as err:
         print(f"poll failed: {err}", file=sys.stderr)
         return 1
+    reading = result.reading
     p1, p2, ptot = derive_power(previous, reading)
     payload = _reading_payload(reading, p1, p2, ptot)
+    if result.relays is not None:
+        payload["mesh_hops"] = len(result.relays)
+        payload["route"] = " -> ".join(result.relays) or "(direct)"
     if json_out:
         _emit_json(payload)
     else:
@@ -262,10 +266,11 @@ async def _poll_loop(znp: ZNP, inv_id: str, ecu_id: str, interval_s: float, json
     previous: DS3Reading | None = None
     while True:
         try:
-            reading = await poll_inverter(znp, inv_id, ecu_id)
+            result = await poll_inverter(znp, inv_id, ecu_id)
         except PollError as err:
             print(f"[poll] {err}", file=sys.stderr)
         else:
+            reading = result.reading
             p1, p2, ptot = derive_power(previous, reading)
             previous = reading
             payload = _reading_payload(reading, p1, p2, ptot)

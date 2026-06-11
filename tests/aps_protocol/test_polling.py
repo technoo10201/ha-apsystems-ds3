@@ -50,16 +50,23 @@ def _run(coro):
 
 
 def test_poll_accepts_matching_expected_serial() -> None:
-    reading = _run(
+    result = _run(
         poll_inverter(_FakeZNP(_BURST), "103A", "D8A3011B9780",
                       expected_serial=_BURST_SERIAL)
     )
-    assert reading.serial == _BURST_SERIAL
+    assert result.reading.serial == _BURST_SERIAL
 
 
 def test_poll_without_expected_serial_keeps_old_behaviour() -> None:
-    reading = _run(poll_inverter(_FakeZNP(_BURST), "103A", "D8A3011B9780"))
-    assert reading.serial == _BURST_SERIAL
+    result = _run(poll_inverter(_FakeZNP(_BURST), "103A", "D8A3011B9780"))
+    assert result.reading.serial == _BURST_SERIAL
+
+
+def test_poll_extracts_route_from_burst() -> None:
+    # _BURST contains "FE0345C43A1000A8" = ZDO_SRC_RTG_IND for dst 0x103A
+    # with 0 relays → direct radio link.
+    result = _run(poll_inverter(_FakeZNP(_BURST), "103A", "D8A3011B9780"))
+    assert result.relays == []
 
 
 def test_poll_rejects_mismatched_serial() -> None:

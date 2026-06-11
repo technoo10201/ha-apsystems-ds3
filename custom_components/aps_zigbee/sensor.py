@@ -19,6 +19,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import (
     PERCENTAGE,
+    EntityCategory,
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfEnergy,
@@ -43,6 +44,7 @@ from .const import (
     SENSOR_FREQUENCY,
     SENSOR_IDC1,
     SENSOR_IDC2,
+    SENSOR_MESH_HOPS,
     SENSOR_POWER_P1,
     SENSOR_POWER_P2,
     SENSOR_POWER_TOTAL,
@@ -184,6 +186,15 @@ SENSORS: tuple[APSSensorDescription, ...] = (
         suggested_display_precision=1,
         entity_registry_enabled_default=False,
     ),
+    APSSensorDescription(
+        key=SENSOR_MESH_HOPS,
+        data_key=SENSOR_MESH_HOPS,
+        translation_key="mesh_hops",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:transit-connection-variant",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+    ),
 )
 
 
@@ -245,11 +256,13 @@ class APSSensor(CoordinatorEntity[APSDataUpdateCoordinator], SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any] | None:
         # Only the headline metric (total power) carries the runtime state so
         # the dashboard isn't littered with the same trio of attributes on
-        # every entity.
-        if self.entity_description.key != SENSOR_POWER_TOTAL:
-            return None
+        # every entity. The mesh-hops diagnostic carries the relay path.
         data = (self.coordinator.data or {}).get(self._serial)
         if data is None:
+            return None
+        if self.entity_description.key == SENSOR_MESH_HOPS:
+            return {"route": data.get("route")}
+        if self.entity_description.key != SENSOR_POWER_TOTAL:
             return None
         return {
             "state": data.get("state"),

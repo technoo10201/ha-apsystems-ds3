@@ -80,6 +80,7 @@ from .const import (
     SENSOR_FREQUENCY,
     SENSOR_IDC1,
     SENSOR_IDC2,
+    SENSOR_MESH_HOPS,
     SENSOR_POWER_P1,
     SENSOR_POWER_P2,
     SENSOR_POWER_TOTAL,
@@ -172,7 +173,7 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
         now = _utcnow()
         data: dict[str, dict[str, Any]] = dict(self.data or {})
         try:
-            reading = await poll_inverter(
+            result = await poll_inverter(
                 self.znp, inv[INV_ID], self._ecu_id, expected_serial=serial
             )
         except (PollError, ZNPError) as err:
@@ -186,11 +187,14 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
             )
             data[serial] = self._render_failure(serial, runtime)
         else:
+            reading = result.reading
             runtime.record_success(now)
             prev = self._previous.get(serial)
             p1, p2, ptot = derive_power(prev, reading)
             self._previous[serial] = reading
-            data[serial] = self._render_success(reading, runtime, p1, p2, ptot)
+            data[serial] = self._render_success(
+                serial, reading, runtime, p1, p2, ptot, result.relays
+            )
         self.async_set_updated_data(data)
 
     async def async_pair_new_inverter(self, serial: str, name: str) -> str:
@@ -484,7 +488,7 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
                 continue
 
             try:
-                reading = await poll_inverter(
+                poll_result = await poll_inverter(
                     self.znp, inv_id, self._ecu_id, expected_serial=serial
                 )
             except (PollError, ZNPError) as err:
@@ -507,11 +511,14 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
                 continue
 
             all_failed = False
+            reading = poll_result.reading
             runtime.record_success(now)
             prev = self._previous.get(serial)
             p1, p2, ptot = derive_power(prev, reading)
             self._previous[serial] = reading
-            result[serial] = self._render_success(reading, runtime, p1, p2, ptot)
+            result[serial] = self._render_success(
+                serial, reading, runtime, p1, p2, ptot, poll_result.relays
+            )
 
         # If every inverter failed and we have at least one paired, we very
         # likely have a coordinator problem rather than N independent inverter
@@ -613,16 +620,34 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
 
     def _render_success(
         self,
+        serial: str,
         reading: DS3Reading,
         runtime: InverterRuntime,
         p1: float,
         p2: float,
         ptot: float,
+        relays: list[str] | None,
     ) -> dict[str, Any]:
         payload = _build_reading_dict(reading, p1, p2, ptot)
         payload.update(runtime.to_attributes())
         payload["available"] = True
+        if relays is None:
+            # The firmware doesn't announce the route on every poll — keep
+            # the last known value instead of flapping to unknown.
+            last = (self.data or {}).get(serial) or {}
+            payload[SENSOR_MESH_HOPS] = last.get(SENSOR_MESH_HOPS)
+            payload["route"] = last.get("route")
+        else:
+            payload[SENSOR_MESH_HOPS] = len(relays)
+            payload["route"] = [self._inverter_label(addr) for addr in relays]
         return payload
+
+    def _inverter_label(self, inv_id: str) -> str:
+        """Best-effort translation of a relay short address to a friendly name."""
+        for inv in self.inverters:
+            if inv[INV_ID].upper() == inv_id.upper():
+                return inv.get(INV_NAME) or inv[INV_SERIAL]
+        return inv_id
 
     def _render_failure(self, serial: str, runtime: InverterRuntime) -> dict[str, Any]:
         last = (self.data or {}).get(serial) or {}

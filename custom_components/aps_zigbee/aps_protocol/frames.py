@@ -175,3 +175,49 @@ def build_zdo_mgmt_rtg_request(dst_addr: str = "0000", start_index: int = 0) -> 
     """
     wire_dst = swap_inv_id_bytes(dst_addr)
     return f"2532{wire_dst}{start_index:02X}"
+
+
+def extract_route(burst: str, inv_id: str) -> list[str] | None:
+    """Pull the mesh route to `inv_id` out of a poll burst, if announced.
+
+    While routing a unicast, the dongle's firmware emits unsolicited
+    `ZDO_SRC_RTG_IND` frames (cmd 0x45C4) describing the source route it
+    used: `FE <len> 45 C4 <dst LE:2> <relay_count:1> <relays LE:2 each> <fcs>`.
+    A direct neighbour yields `relay_count=0`; a 2-hop inverter lists its
+    relays in the order the firmware reports them (inverter side first).
+
+    Returns the relay short addresses in human (big-endian) form for the
+    **last** 0x45C4 frame matching `inv_id`, `[]` for a direct link, or
+    `None` when the burst contains no route indication for that address
+    (the firmware does not emit one on every poll).
+    """
+    wire_dst = swap_inv_id_bytes(inv_id).upper()
+    burst_u = burst.upper().replace(" ", "")
+    relays: list[str] | None = None
+    pos = 0
+    while True:
+        pos = burst_u.find("45C4" + wire_dst, pos)
+        if pos == -1:
+            break
+        # The length byte sits right before "45C4" (frame = FE LEN 45 C4 ...).
+        if pos < 4 or burst_u[pos - 4 : pos - 2] != "FE":
+            pos += 4
+            continue
+        length = int(burst_u[pos - 2 : pos], 16)
+        count_pos = pos + 8                       # after cmd(4) + dst(4)
+        if count_pos + 2 > len(burst_u):
+            break
+        relay_count = int(burst_u[count_pos : count_pos + 2], 16)
+        # Sanity: LEN must cover dst(2) + count(1) + relays(2*count).
+        if length != 3 + 2 * relay_count:
+            pos += 4
+            continue
+        hop_hex = burst_u[count_pos + 2 : count_pos + 2 + 4 * relay_count]
+        if len(hop_hex) < 4 * relay_count:
+            break
+        relays = [
+            swap_inv_id_bytes(hop_hex[i : i + 4])
+            for i in range(0, len(hop_hex), 4)
+        ]
+        pos += 4
+    return relays
