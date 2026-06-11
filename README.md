@@ -384,6 +384,7 @@ entities:
 | `Grid frequency` | Hz | frequency | measurement |
 | `Temperature` | °C | temperature | measurement |
 | `Zigbee signal quality` | % | — | measurement (disabled by default) |
+| `Mesh hops` | — | — | measurement (diagnostic, disabled by default) |
 
 Energy uses `total_increasing` so the **Energy** dashboard handles
 inverter-side resets automatically.
@@ -396,6 +397,14 @@ templates / automations:
 - `last_seen` — ISO timestamp of the last successful poll.
 - `consecutive_failures` — daytime failure streak; reset to zero on success
   and at sunrise.
+
+**Mesh hops** is the honest alternative to a "distance" reading (Zigbee has
+no time-of-flight ranging, and per-frame LQI only describes the last radio
+hop). It counts the relays between the inverter and the dongle — `0` means a
+direct radio link — and its `route` attribute lists the relay inverters by
+name, straight from the source-route announcements the dongle's firmware
+emits while polling. A hop count that grows or a route that changes daily is
+your early warning that the mesh is struggling.
 
 ### Per-inverter buttons
 
@@ -464,6 +473,39 @@ debugging.
 | `aps_zigbee.pair_inverter` | Pair a new inverter (`serial`, optional `name`). |
 | `aps_zigbee.repoll` | Force an immediate refresh cycle. |
 | `aps_zigbee.reboot_inverter` | Send the proprietary reboot command (`serial`). |
+| `aps_zigbee.discover` | Dump the dongle's neighbour + routing tables to the debug log. |
+| `aps_zigbee.rebind_persistent` | Re-run the pair handshake in a loop (`serial`, `duration` min, `pause` s) until the inverter answers. |
+| `aps_zigbee.cancel_rebind` | Stop the running persistent re-bind campaign. |
+
+### Persistent re-bind
+
+The pair handshake is the most demanding radio operation of the whole
+protocol: the request broadcast is relayed by the mesh, but the inverter —
+not yet a mesh member — can only answer **by direct radio**, single hop, to
+the dongle. An inverter at the edge of that direct range may fail a one-shot
+**Re-bind** every time, while still being perfectly pollable through the
+mesh once bound.
+
+A marginal link is not a constant, though: it fluctuates with PV output
+(the inverter's transmitter is at its best at full production), weather and
+multipath. `rebind_persistent` exploits that by sampling the channel — one
+~20 s handshake cycle every `pause` seconds for up to `duration` minutes:
+
+```yaml
+service: aps_zigbee.rebind_persistent
+data:
+  serial: "408000158211"
+  duration: 60      # minutes (default 30, max 240)
+  pause: 60         # seconds between attempts (default 60)
+```
+
+Polling of the other inverters keeps running between attempts, the watchdog
+stays quiet, and you get a persistent notification when the campaign ends —
+success (the stored short address is updated automatically) or expiry.
+Best started around solar noon. If several campaigns on different days all
+fail, the link budget verdict is final: pair once with the dongle
+physically next to the inverter, then move it back (the binding survives,
+and the mesh relays the polling afterwards).
 
 ---
 
@@ -478,6 +520,8 @@ debugging.
 | Power jumps to a huge value right after restart | The first sample after restart has a stale "previous" reading. | The coordinator handles inverter-side resets but a HA restart resets *our* state; one polling cycle later the values are correct. |
 | `state` attribute is `idle` | Sun is below the horizon — normal night-time behaviour. | Wait for sunrise; the inverter will resume on its own. |
 | `state` attribute stays `dead` during the day | Real loss of Zigbee link (range, dead inverter, dongle issue). | Check `signal_quality` history; move the dongle closer; press **Reboot inverter** in the device card; failing that, re-pair. |
+| Warning `answered with serial X, expected Y` | Two inverters have their (serial ↔ invID) mappings swapped — typically a mix-up during manual invID entry. Their data would otherwise be silently cross-attributed. | Remove **both** inverters from the integration, then re-add each with the invID the warning reports for its serial. |
+| Poll always fails with `AF_DATA_CONFIRM did not succeed` | The short address doesn't exist on the mesh — stale manual invID (e.g. from an old pairing) or the inverter never joined this network. | Run a real pair handshake: **Re-bind**, `rebind_persistent` at full sun, or pair once with the dongle next to the inverter. |
 | All inverters go silent at the same time | Coordinator wedged (firmware lock-up) or USB-TTL bridge unplugged. | The watchdog will recover automatically within 5 min. Speed it up by reloading the integration. |
 
 Enable verbose protocol logs:
