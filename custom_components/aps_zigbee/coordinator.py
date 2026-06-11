@@ -46,7 +46,11 @@ from .aps_protocol.pairing import (
     pair_inverter,
 )
 from .aps_protocol.polling import PollError, poll_inverter, reboot_inverter
-from .aps_protocol.runtime import InverterRuntime, InverterState
+from .aps_protocol.runtime import (
+    InverterRuntime,
+    InverterState,
+    reset_night_counters,
+)
 from .aps_protocol.znp import ZNP, ZNPError
 from .const import (
     BACKOFF_BASE_S,
@@ -109,6 +113,11 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
         self._runtimes: dict[str, InverterRuntime] = {}
         self._init_done = False
         self._watchdog_task: asyncio.Task[None] | None = None
+        # Tracks the day/night state of the previous update cycle so the
+        # night→day transition (sunrise) can reset the failure counters.
+        # Starting at False means the first daytime cycle after a (re)start
+        # triggers a reset on already-zeroed counters — harmless.
+        self._was_sun_up = False
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -444,6 +453,14 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
             raise UpdateFailed("coordinator not initialised")
 
         sun_is_up = is_up(self.hass)
+        if sun_is_up and not self._was_sun_up:
+            # Sunrise: inverters wake up gradually with the light, so any
+            # failure streak carried over from the previous evening must not
+            # shorten their morning grace period (README "fresh five chances").
+            reset_night_counters(self._runtimes)
+            _LOGGER.debug("sunrise detected — failure counters reset")
+        self._was_sun_up = sun_is_up
+
         now = _utcnow()
         result: dict[str, dict[str, Any]] = {}
         all_failed = True

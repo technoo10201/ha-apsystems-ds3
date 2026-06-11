@@ -144,6 +144,40 @@ def test_reset_night_counters_clears_failures_only() -> None:
     assert rt_b.next_retry_after == retry_b
 
 
+def test_sunrise_reset_gives_fresh_chances_after_evening_failures() -> None:
+    """Full day→night→sunrise scenario (the coordinator's sunrise hook).
+
+    An inverter that racked up failures at dusk (weak light, e.g. 4/5 on
+    the DEAD threshold) must NOT be one failure away from DEAD at dawn:
+    the sunrise reset gives it the full DEAD_THRESHOLD chances again while
+    it warms up with the morning light.
+    """
+    rt = InverterRuntime(serial="x")
+
+    # Dusk: 4 daytime failures — one short of DEAD.
+    for _ in range(4):
+        rt.record_failure(_T0, sun_is_up=True, dead_threshold=5)
+    assert rt.state is InverterState.STALE
+    assert rt.consecutive_failures == 4
+
+    # Night: polls keep failing, state collapses to IDLE, counter frozen.
+    night = _T0 + timedelta(hours=8)
+    rt.record_failure(night, sun_is_up=False, dead_threshold=5)
+    assert rt.state is InverterState.IDLE
+    assert rt.consecutive_failures == 4  # frozen, not incremented
+
+    # Sunrise: the coordinator calls reset_night_counters on the
+    # night→day transition.
+    reset_night_counters({"x": rt})
+    assert rt.consecutive_failures == 0
+
+    # First failed poll of the morning: back to 1/5 (STALE), not DEAD.
+    morning = night + timedelta(hours=10)
+    rt.record_failure(morning, sun_is_up=True, dead_threshold=5)
+    assert rt.state is InverterState.STALE
+    assert rt.consecutive_failures == 1
+
+
 def test_state_enum_values_are_stable_strings() -> None:
     # The HA dashboard / templates rely on these exact strings.
     assert InverterState.OK.value == "ok"
