@@ -88,6 +88,7 @@ from .const import (
     SENSOR_TEMPERATURE,
     SENSOR_VDC1,
     SENSOR_VDC2,
+    SERVICE_CANCEL_REBIND,
     WATCHDOG_INTERVAL_S,
 )
 
@@ -124,6 +125,13 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
         # Starting at False means the first daytime cycle after a (re)start
         # triggers a reset on already-zeroed counters — harmless.
         self._was_sun_up = False
+        # Persistent re-bind campaign (rebind_persistent service) and the
+        # "a pair handshake is on the air right now" flag. While the flag is
+        # set the coordinator is in no-NO mode and unicast polls would all
+        # fail with INVALID_PARAMETER — the polling loop skips the bus
+        # entirely instead of recording bogus failures.
+        self._campaign_task: asyncio.Task[None] | None = None
+        self._pairing_active = False
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -136,7 +144,8 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
         self._init_done = True
 
     async def async_close(self) -> None:
-        """Stop the watchdog and close the underlying serial transport."""
+        """Stop watchdog + campaign and close the underlying serial transport."""
+        await self.async_cancel_rebind_campaign()
         if self._watchdog_task is not None:
             self._watchdog_task.cancel()
             try:
@@ -169,6 +178,12 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
         inv = next((i for i in self.inverters if i[INV_SERIAL] == serial), None)
         if inv is None:
             raise KeyError(f"unknown inverter {serial}")
+        if self._pairing_active:
+            _LOGGER.info(
+                "refresh of %s skipped: a pair handshake is in progress",
+                serial,
+            )
+            return
         runtime = self._runtime(serial)
         now = _utcnow()
         data: dict[str, dict[str, Any]] = dict(self.data or {})
@@ -333,27 +348,36 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
 
         if not self._init_done:
             await self.async_open()
-        if not await init_coordinator(self.znp, self._ecu_id, normal_ops=False):
-            raise PairingError("coordinator re-init failed before re-bind")
-        # Exclude all paired short addresses except this one's, so the
-        # extractor is allowed to return `expected_inv_id` if the inverter
-        # echoes its known address.
-        other_inv_ids = [
-            i[INV_ID]
-            for i in self.entry.data.get(CONF_INVERTERS, [])
-            if i[INV_SERIAL] != serial
-        ]
+        # While the handshake is on the air the coordinator is in no-NO mode:
+        # flag it so the regular polling loop skips the bus instead of
+        # recording bogus failures for every healthy inverter.
+        self._pairing_active = True
         try:
-            observed_inv_id = await pair_inverter(
-                self.znp, serial, self._ecu_id, known_inv_ids=other_inv_ids
-            )
-        finally:
+            if not await init_coordinator(
+                self.znp, self._ecu_id, normal_ops=False
+            ):
+                raise PairingError("coordinator re-init failed before re-bind")
+            # Exclude all paired short addresses except this one's, so the
+            # extractor is allowed to return `expected_inv_id` if the inverter
+            # echoes its known address.
+            other_inv_ids = [
+                i[INV_ID]
+                for i in self.entry.data.get(CONF_INVERTERS, [])
+                if i[INV_SERIAL] != serial
+            ]
             try:
-                await self.znp.request(build_no_command(self._ecu_id))
-            except ZNPError:
-                _LOGGER.debug(
-                    "post-rebind sendNO failed (will retry next cycle)"
+                observed_inv_id = await pair_inverter(
+                    self.znp, serial, self._ecu_id, known_inv_ids=other_inv_ids
                 )
+            finally:
+                try:
+                    await self.znp.request(build_no_command(self._ecu_id))
+                except ZNPError:
+                    _LOGGER.debug(
+                        "post-rebind sendNO failed (will retry next cycle)"
+                    )
+        finally:
+            self._pairing_active = False
 
         await asyncio.sleep(2.0)
 
@@ -377,6 +401,122 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
 
         await self.async_request_refresh()
         return observed_inv_id or expected_inv_id
+
+    async def async_start_rebind_campaign(
+        self, serial: str, duration_min: int, pause_s: int
+    ) -> None:
+        """Start a persistent re-bind campaign for one inverter.
+
+        A marginal radio link fluctuates (PV output, weather, multipath):
+        a handshake that fails now can succeed an hour later. The campaign
+        re-runs the short re-bind cycle every `pause_s` seconds for up to
+        `duration_min` minutes, sampling the channel until a lucky window —
+        the honest software-only attempt before physically moving the
+        dongle next to the inverter.
+
+        Each cycle is the existing `async_rebind_inverter` (~20-25 s, with
+        sendNO restored in its finally), so normal polling of the other
+        inverters resumes between cycles and the watchdog never starves.
+        """
+        if self._campaign_task is not None and not self._campaign_task.done():
+            raise PairingError(
+                "a re-bind campaign is already running — cancel it first "
+                f"({SERVICE_CANCEL_REBIND})"
+            )
+        if not any(
+            i[INV_SERIAL] == serial
+            for i in self.entry.data.get(CONF_INVERTERS, [])
+        ):
+            raise PairingError(f"unknown inverter serial {serial!r}")
+        self._campaign_task = self.hass.loop.create_task(
+            self._rebind_campaign_loop(serial, duration_min, pause_s)
+        )
+
+    async def async_cancel_rebind_campaign(self) -> None:
+        """Stop the running re-bind campaign, if any (idempotent)."""
+        task = self._campaign_task
+        if task is None or task.done():
+            self._campaign_task = None
+            return
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+        self._campaign_task = None
+        self._pairing_active = False
+        _LOGGER.info("re-bind campaign cancelled")
+
+    async def _rebind_campaign_loop(
+        self, serial: str, duration_min: int, pause_s: int
+    ) -> None:
+        deadline = _utcnow() + timedelta(minutes=duration_min)
+        cycle = 0
+        _LOGGER.warning(
+            "re-bind campaign started for %s: up to %d min, one attempt "
+            "every %d s",
+            serial,
+            duration_min,
+            pause_s,
+        )
+        try:
+            while _utcnow() < deadline:
+                cycle += 1
+                try:
+                    inv_id = await self.async_rebind_inverter(serial)
+                except (PairingError, ZNPError) as err:
+                    remaining = int((deadline - _utcnow()).total_seconds() / 60)
+                    _LOGGER.info(
+                        "re-bind campaign for %s: cycle %d failed (%s) — "
+                        "~%d min left",
+                        serial,
+                        cycle,
+                        err,
+                        remaining,
+                    )
+                else:
+                    _LOGGER.warning(
+                        "re-bind campaign for %s SUCCEEDED on cycle %d "
+                        "(inv_id %s)",
+                        serial,
+                        cycle,
+                        inv_id,
+                    )
+                    self._notify(
+                        "Ré-association réussie",
+                        f"L'onduleur {serial} a répondu au cycle {cycle} "
+                        f"(adresse {inv_id}). Le polling reprend "
+                        "automatiquement.",
+                    )
+                    return
+                await asyncio.sleep(pause_s)
+            _LOGGER.warning(
+                "re-bind campaign for %s expired after %d cycles without an "
+                "answer",
+                serial,
+                cycle,
+            )
+            self._notify(
+                "Ré-association échouée",
+                f"L'onduleur {serial} n'a pas répondu en {duration_min} min "
+                f"({cycle} tentatives). Réessayez en pleine production "
+                "(midi solaire) ou refaites l'appairage avec le dongle à "
+                "proximité de l'onduleur.",
+            )
+        finally:
+            self._pairing_active = False
+            self._campaign_task = None
+
+    def _notify(self, title: str, message: str) -> None:
+        """Fire-and-forget persistent notification (best effort)."""
+        try:
+            from homeassistant.components.persistent_notification import (
+                async_create,
+            )
+
+            async_create(self.hass, message, title=title)
+        except Exception:  # pragma: no cover - notification is cosmetic
+            _LOGGER.debug("persistent notification failed", exc_info=True)
 
     async def async_register_inverter(
         self, serial: str, name: str, inv_id: str
@@ -462,6 +602,18 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         if not self._init_done:
             raise UpdateFailed("coordinator not initialised")
+
+        if self._pairing_active:
+            # A pair handshake is on the air: the coordinator is in no-NO
+            # mode and every unicast poll would fail with INVALID_PARAMETER.
+            # Serve the previous values untouched instead of recording
+            # bogus failures against healthy inverters.
+            return {
+                inv[INV_SERIAL]: self._carry_forward(
+                    inv[INV_SERIAL], self._runtime(inv[INV_SERIAL])
+                )
+                for inv in self.inverters
+            }
 
         sun_is_up = is_up(self.hass)
         if sun_is_up and not self._was_sun_up:

@@ -126,5 +126,29 @@
         "name": "Ré-associer"
       }
     }
+  },
+  "services": {
+    "rebind_persistent": {
+      "name": "Ré-association persistante",
+      "description": "Relance le handshake d'appairage en boucle pour un onduleur jusqu'à réponse, expiration ou annulation. Un lien radio limite fluctue avec la production et la météo : insister peut accrocher une fenêtre favorable. À lancer de préférence au midi solaire. Le polling des autres onduleurs continue entre les tentatives.",
+      "fields": {
+        "serial": {
+          "name": "Numéro de série",
+          "description": "Onduleur à ré-associer (12 chiffres)."
+        },
+        "duration": {
+          "name": "Durée max (minutes)",
+          "description": "Abandonne après ce délai (défaut 30, max 240)."
+        },
+        "pause": {
+          "name": "Pause entre tentatives (secondes)",
+          "description": "Attente entre deux cycles de handshake (défaut 60)."
+        }
+      }
+    },
+    "cancel_rebind": {
+      "name": "Annuler la ré-association persistante",
+      "description": "Arrête la campagne de ré-association en cours, le cas échéant."
+    }
   }
 }

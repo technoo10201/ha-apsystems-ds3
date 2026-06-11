@@ -126,5 +126,29 @@
         "name": "Re-bind"
       }
     }
+  },
+  "services": {
+    "rebind_persistent": {
+      "name": "Persistent re-bind",
+      "description": "Repeatedly re-run the pair handshake for one inverter until it answers, the duration expires, or the campaign is cancelled. A marginal radio link fluctuates with PV output and weather — insisting can catch a window a one-shot re-bind misses. Best started around solar noon. Polling of the other inverters keeps running between attempts.",
+      "fields": {
+        "serial": {
+          "name": "Serial number",
+          "description": "Inverter to re-bind (12 digits)."
+        },
+        "duration": {
+          "name": "Max duration (minutes)",
+          "description": "Give up after this many minutes (default 30, max 240)."
+        },
+        "pause": {
+          "name": "Pause between attempts (seconds)",
+          "description": "Wait between two handshake cycles (default 60)."
+        }
+      }
+    },
+    "cancel_rebind": {
+      "name": "Cancel persistent re-bind",
+      "description": "Stop the running persistent re-bind campaign, if any."
+    }
   }
 }

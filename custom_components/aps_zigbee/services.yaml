@@ -39,3 +39,51 @@ reboot_inverter:
       example: "408000158211"
       selector:
         text: {}
+
+discover:
+  name: Discover mesh
+  description: >-
+    Dump the dongle's Zigbee neighbour and routing tables to the Home
+    Assistant log (debug level). Useful to check which inverter short
+    addresses are actually reachable on the mesh.
+
+rebind_persistent:
+  name: Persistent re-bind
+  description: >-
+    Repeatedly re-run the pair handshake for one inverter until it answers,
+    the duration expires, or the campaign is cancelled. A marginal radio
+    link fluctuates with PV output and weather, so insisting can catch a
+    window where a one-shot re-bind fails. Best started around solar noon.
+    Polling of the other inverters keeps running between attempts.
+  fields:
+    serial:
+      name: Serial number
+      description: Inverter to re-bind, by its 12-digit serial number.
+      required: true
+      example: "408000158211"
+      selector:
+        text: {}
+    duration:
+      name: Max duration (minutes)
+      description: Give up after this many minutes (default 30, max 240).
+      required: false
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 240
+          unit_of_measurement: min
+    pause:
+      name: Pause between attempts (seconds)
+      description: Wait this long between handshake cycles (default 60).
+      required: false
+      default: 60
+      selector:
+        number:
+          min: 20
+          max: 600
+          unit_of_measurement: s
+
+cancel_rebind:
+  name: Cancel persistent re-bind
+  description: Stop the running persistent re-bind campaign, if any.

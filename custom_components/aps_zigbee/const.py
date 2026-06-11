@@ -45,9 +45,20 @@ SERVICE_PAIR_INVERTER: Final = "pair_inverter"
 SERVICE_REPOLL: Final = "repoll"
 SERVICE_REBOOT_INVERTER: Final = "reboot_inverter"
 SERVICE_DISCOVER: Final = "discover"
+SERVICE_REBIND_PERSISTENT: Final = "rebind_persistent"
+SERVICE_CANCEL_REBIND: Final = "cancel_rebind"
 
 ATTR_SERIAL: Final = "serial"
 ATTR_NAME: Final = "name"
+ATTR_DURATION_MIN: Final = "duration"
+ATTR_PAUSE_S: Final = "pause"
+
+# Persistent re-bind campaign bounds (minutes / seconds)
+CAMPAIGN_DURATION_DEFAULT_MIN: Final = 30
+CAMPAIGN_DURATION_MAX_MIN: Final = 240
+CAMPAIGN_PAUSE_DEFAULT_S: Final = 60
+CAMPAIGN_PAUSE_MIN_S: Final = 20
+CAMPAIGN_PAUSE_MAX_S: Final = 600
 
 # Sensor keys exposed by the coordinator data dict (per inverter).
 # These are what `SensorEntityDescription.key` maps to.
