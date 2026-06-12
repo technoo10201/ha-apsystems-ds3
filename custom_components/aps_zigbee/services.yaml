@@ -54,7 +54,11 @@ rebind_persistent:
     the duration expires, or the campaign is cancelled. A marginal radio
     link fluctuates with PV output and weather, so insisting can catch a
     window where a one-shot re-bind fails. Best started around solar noon.
-    Polling of the other inverters keeps running between attempts.
+    Polling of the other inverters keeps running between attempts, but each
+    cycle resets the dongle's routing tables: multi-hop inverters may show
+    stale data (state `idle`) for the duration of the campaign. They are
+    never escalated to `dead` by the campaign and recover within minutes of
+    its end.
   fields:
     serial:
       name: Serial number
@@ -75,13 +79,17 @@ rebind_persistent:
           unit_of_measurement: min
     pause:
       name: Pause between attempts (seconds)
-      description: Wait this long between handshake cycles (default 60).
+      description: >-
+        Wait this long between handshake cycles (default 300). Each cycle
+        resets the dongle's routing tables; the pause must leave the mesh
+        enough time to rebuild its multi-hop routes, so values below 120 s
+        are rejected.
       required: false
-      default: 60
+      default: 300
       selector:
         number:
-          min: 20
-          max: 600
+          min: 120
+          max: 1800
           unit_of_measurement: s
 
 cancel_rebind:

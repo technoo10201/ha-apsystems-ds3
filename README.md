@@ -496,12 +496,23 @@ service: aps_zigbee.rebind_persistent
 data:
   serial: "408000158211"
   duration: 60      # minutes (default 30, max 240)
-  pause: 60         # seconds between attempts (default 60)
+  pause: 300        # seconds between attempts (default 300, min 120)
 ```
 
-Polling of the other inverters keeps running between attempts, the watchdog
-stays quiet, and you get a persistent notification when the campaign ends —
-success (the stored short address is updated automatically) or expiry.
+Polling of the other inverters keeps running between attempts and you get a
+persistent notification when the campaign ends — success (the stored short
+address is updated automatically) or expiry.
+
+> ⚠️ Each handshake cycle resets the dongle's routing tables (the re-init
+> sequence includes a `SYS_RESET`, mirroring the upstream firmware). The
+> mesh rebuilds its multi-hop routes between cycles — that is why the pause
+> has a 120 s floor. During a campaign, far inverters may show stale data
+> with `state: idle`; they are deliberately never escalated to `dead` by
+> campaign-induced failures and recover within minutes of the campaign's
+> end. Each cycle also broadcasts a standard Zigbee **permit-join** window
+> so the unpaired inverter can associate through its mesh neighbours — the
+> piece the upstream firmware never sends, and presumably how the official
+> APS ECU commissions a whole roof from a utility room.
 Best started around solar noon. If several campaigns on different days all
 fail, the link budget verdict is final: pair once with the dongle
 physically next to the inverter, then move it back (the binding survives,

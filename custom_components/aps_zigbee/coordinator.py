@@ -196,7 +196,7 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
             _LOGGER.warning("on-demand poll failed for %s: %s", serial, err)
             runtime.record_failure(
                 now,
-                sun_is_up=is_up(self.hass),
+                sun_is_up=is_up(self.hass) and not self._campaign_running,
                 dead_threshold=DEAD_THRESHOLD,
                 base_s=BACKOFF_BASE_S,
                 cap_s=BACKOFF_MAX_S,
@@ -408,6 +408,11 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
 
         await self.async_request_refresh()
         return observed_inv_id or expected_inv_id
+
+    @property
+    def _campaign_running(self) -> bool:
+        """True while a persistent re-bind campaign task is alive."""
+        return self._campaign_task is not None and not self._campaign_task.done()
 
     async def _async_open_permit_join(self, duration_s: int = 180) -> None:
         """Broadcast a permit-join window to every router on the mesh.
@@ -672,6 +677,14 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
             _LOGGER.debug("sunrise detected — failure counters reset")
         self._was_sun_up = sun_is_up
 
+        # Every re-bind cycle SYS_RESETs the dongle, wiping its mesh routing
+        # tables; multi-hop inverters legitimately fail to answer until the
+        # routes rebuild. While a campaign is running those failures are
+        # campaign-induced, not inverter faults — gate them to IDLE (same
+        # mechanism as night-time) so healthy inverters never get escalated
+        # to DEAD by our own radio activity.
+        count_failures = sun_is_up and not self._campaign_running
+
         now = _utcnow()
         result: dict[str, dict[str, Any]] = {}
         all_failed = True
@@ -702,7 +715,7 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
                 log("poll failed for %s (%s): %s", serial, inv_id, err)
                 runtime.record_failure(
                     now,
-                    sun_is_up=sun_is_up,
+                    sun_is_up=count_failures,
                     dead_threshold=DEAD_THRESHOLD,
                     base_s=BACKOFF_BASE_S,
                     cap_s=BACKOFF_MAX_S,

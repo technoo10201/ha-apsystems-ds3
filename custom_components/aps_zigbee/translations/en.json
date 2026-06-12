@@ -142,7 +142,7 @@
         },
         "pause": {
           "name": "Pause between attempts (seconds)",
-          "description": "Wait between two handshake cycles (default 60)."
+          "description": "Wait between two handshake cycles (default 300 s). Each cycle resets the dongle's routing tables — the pause must leave the mesh time to rebuild, so the minimum is 120 s."
         }
       }
     },

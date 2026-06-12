@@ -142,7 +142,7 @@
         },
         "pause": {
           "name": "Pause entre tentatives (secondes)",
-          "description": "Attente entre deux cycles de handshake (défaut 60)."
+          "description": "Attente entre deux cycles de handshake (défaut 300 s). Chaque cycle réinitialise les tables de routage du dongle — la pause doit laisser le mesh se reconstruire, minimum 120 s."
         }
       }
     },

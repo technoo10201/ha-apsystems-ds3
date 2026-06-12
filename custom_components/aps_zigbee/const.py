@@ -56,9 +56,9 @@ ATTR_PAUSE_S: Final = "pause"
 # Persistent re-bind campaign bounds (minutes / seconds)
 CAMPAIGN_DURATION_DEFAULT_MIN: Final = 30
 CAMPAIGN_DURATION_MAX_MIN: Final = 240
-CAMPAIGN_PAUSE_DEFAULT_S: Final = 60
-CAMPAIGN_PAUSE_MIN_S: Final = 20
-CAMPAIGN_PAUSE_MAX_S: Final = 600
+CAMPAIGN_PAUSE_DEFAULT_S: Final = 300
+CAMPAIGN_PAUSE_MIN_S: Final = 120
+CAMPAIGN_PAUSE_MAX_S: Final = 1800
 
 # Sensor keys exposed by the coordinator data dict (per inverter).
 # These are what `SensorEntityDescription.key` maps to.
