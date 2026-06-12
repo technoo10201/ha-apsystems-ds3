@@ -510,9 +510,14 @@ address is updated automatically) or expiry.
 > with `state: idle`; they are deliberately never escalated to `dead` by
 > campaign-induced failures and recover within minutes of the campaign's
 > end. Each cycle also broadcasts a standard Zigbee **permit-join** window
-> so the unpaired inverter can associate through its mesh neighbours — the
-> piece the upstream firmware never sends, and presumably how the official
-> APS ECU commissions a whole roof from a utility room.
+> so the unpaired inverter *could* associate through its mesh neighbours —
+> the piece the upstream firmware never sends. Field honesty: in the one
+> installation this was tested on, a DS3 with two paired neighbours 2 m
+> away never joined through them across 22 clean cycles at peak sun — the
+> inverter-side firmware does not appear to attempt router association
+> during the proprietary handshake. The broadcast is kept because it is
+> free, harmless, and other inverter generations may behave differently.
+> Plan for physical proximity for the very first pairing.
 Best started around solar noon. If several campaigns on different days all
 fail, the link budget verdict is final: pair once with the dongle
 physically next to the inverter, then move it back (the binding survives,
