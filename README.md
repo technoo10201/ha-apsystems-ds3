@@ -217,7 +217,7 @@ wrong wiring (RX/TX swapped) or wrong voltage on VCC.
 
 Before installing the integration in Home Assistant, validate every layer of
 the stack from a terminal with the bundled diagnostic CLI. It only needs the
-`pyserial-asyncio` Python package — same one Home Assistant will use.
+`pyserial-asyncio-fast` Python package — same one Home Assistant will use.
 
 ```bash
 git clone git@github.com:technoo10201/ha-apsystems-ds3.git
@@ -555,7 +555,7 @@ logger:
 │  │      ├─ polling.py    poll request + response gates   │   │
 │  │      └─ decode_ds3.py field offsets + scaling         │   │
 │  └───────────────────────────────────────────────────────┘   │
-│                       │ pyserial-asyncio                     │
+│                       │ pyserial-asyncio-fast                │
 └───────────────────────┼──────────────────────────────────────┘
                         │ /dev/serial/by-id/...
                 ┌───────▼────────┐

@@ -21,8 +21,15 @@ import time
 from typing import Final
 
 import serial  # type: ignore[import-untyped]
-import serial_asyncio  # type: ignore[import-untyped]
 from serial import SerialException  # type: ignore[import-untyped]
+
+# Home Assistant ships (and from 2026.7 *requires*) the maintained fork
+# `pyserial-asyncio-fast`; the API is identical. Fall back to the original
+# package so the CLI keeps working in plain virtualenvs that still have it.
+try:
+    import serial_asyncio_fast as serial_asyncio  # type: ignore[import-untyped]
+except ImportError:  # pragma: no cover - depends on the environment
+    import serial_asyncio  # type: ignore[import-untyped]
 
 _LOGGER = logging.getLogger(__name__)
 
