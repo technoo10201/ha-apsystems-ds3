@@ -221,3 +221,29 @@ def extract_route(burst: str, inv_id: str) -> list[str] | None:
         ]
         pos += 4
     return relays
+
+
+def build_zdo_mgmt_permit_join_request(
+    duration_s: int = 180, dst_addr: str = "FFFC", legacy: bool = False
+) -> str:
+    """Return the `ZDO_MGMT_PERMIT_JOIN_REQ` payload (cmd 0x2536).
+
+    Broadcasts (default dst `FFFC` = all routers) a standard Zigbee
+    permit-join window so an **unjoined** inverter can associate through
+    any mesh router — its roof neighbours — instead of needing a direct
+    radio path to the dongle for the pair handshake. This is presumably
+    what the official APS ECU does when commissioning a whole roof from
+    the garage; the reverse-engineered upstream firmware never sends it.
+
+    Two wire formats exist: modern Z-Stack prepends an `AddrMode` byte
+    (0x0F = broadcast) before the destination, the older ZNP 1.x format
+    starts directly at the destination. Pass `legacy=True` for the latter
+    — the caller can try both and keep whichever the firmware accepts.
+
+    Spec: Texas Instruments Z-Stack ZNP API, `ZDO_MGMT_PERMIT_JOIN_REQ`.
+    """
+    duration = max(1, min(0xFE, duration_s))
+    wire_dst = swap_inv_id_bytes(dst_addr)
+    if legacy:
+        return f"2536{wire_dst}{duration:02X}00"
+    return f"25360F{wire_dst}{duration:02X}00"

@@ -38,6 +38,7 @@ from .aps_protocol.decode_ds3 import DS3Reading, derive_power
 from .aps_protocol.frames import (
     build_no_command,
     build_zdo_mgmt_lqi_request,
+    build_zdo_mgmt_permit_join_request,
     build_zdo_mgmt_rtg_request,
 )
 from .aps_protocol.pairing import (
@@ -234,6 +235,9 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
         # data requests for the pairing handshake.
         if not await init_coordinator(self.znp, self._ecu_id, normal_ops=False):
             raise PairingError("coordinator re-init failed before pairing")
+        # Open joining on every router so the inverter can come back through
+        # its mesh neighbours, not only by direct radio.
+        await self._async_open_permit_join()
         # Pass already-paired short addresses so the extractor never returns
         # a neighbour's invID for the new inverter (see pairing._extract_inv_id).
         existing_inv_ids = [
@@ -357,6 +361,9 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
                 self.znp, self._ecu_id, normal_ops=False
             ):
                 raise PairingError("coordinator re-init failed before re-bind")
+            # Open joining on every router so the inverter can come back
+            # through its mesh neighbours, not only by direct radio.
+            await self._async_open_permit_join()
             # Exclude all paired short addresses except this one's, so the
             # extractor is allowed to return `expected_inv_id` if the inverter
             # echoes its known address.
@@ -401,6 +408,47 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
 
         await self.async_request_refresh()
         return observed_inv_id or expected_inv_id
+
+    async def _async_open_permit_join(self, duration_s: int = 180) -> None:
+        """Broadcast a permit-join window to every router on the mesh.
+
+        Lets an unjoined inverter associate through its roof neighbours
+        instead of needing direct radio to the dongle — presumably what the
+        official APS ECU does when commissioning. The upstream firmware
+        never sends this, so it is opportunistic: failures are logged, never
+        raised (the direct-radio pair path still works without it).
+
+        The ZNP wire format grew an AddrMode byte over Z-Stack revisions;
+        try the modern form first and fall back to the legacy one if the
+        firmware rejects it.
+        """
+        for legacy in (False, True):
+            cmd = build_zdo_mgmt_permit_join_request(
+                duration_s=duration_s, legacy=legacy
+            )
+            try:
+                reply = await self.znp.request(cmd)
+            except ZNPError as err:
+                _LOGGER.debug("permit-join (legacy=%s) failed: %s", legacy, err)
+                continue
+            reply_u = (reply or "").upper()
+            # SRSP success = FE 01 65 36 00; anything else means the firmware
+            # rejected this form.
+            if "653600" in reply_u:
+                _LOGGER.info(
+                    "permit-join window opened on all routers for %d s "
+                    "(legacy=%s)",
+                    duration_s,
+                    legacy,
+                )
+                return
+            _LOGGER.debug(
+                "permit-join (legacy=%s) rejected: %s", legacy, reply_u[:40]
+            )
+        _LOGGER.warning(
+            "permit-join broadcast rejected by the firmware in both wire "
+            "formats — pairing will rely on direct radio only"
+        )
 
     async def async_start_rebind_campaign(
         self, serial: str, duration_min: int, pause_s: int

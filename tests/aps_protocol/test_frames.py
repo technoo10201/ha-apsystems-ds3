@@ -16,6 +16,7 @@ from custom_components.aps_zigbee.aps_protocol.frames import (
     build_pair_commands,
     build_poll_command,
     build_reboot_command,
+    build_zdo_mgmt_permit_join_request,
     ecu_id_reverse,
     extract_route,
 )
@@ -138,3 +139,24 @@ def test_extract_route_rejects_payload_lookalike() -> None:
     # must not be parsed as a route.
     burst = "FE7D44810000060145C477E402EDE1AFB501AABB"
     assert extract_route(burst, "E477") is None
+
+
+def test_permit_join_modern_format() -> None:
+    # AddrMode 0x0F (broadcast) + dst FFFC (all routers, LE) + 180 s + TCSig 0
+    assert (
+        build_zdo_mgmt_permit_join_request(duration_s=180)
+        == "25360FFCFFB400"
+    )
+
+
+def test_permit_join_legacy_format() -> None:
+    assert (
+        build_zdo_mgmt_permit_join_request(duration_s=180, legacy=True)
+        == "2536FCFFB400"
+    )
+
+
+def test_permit_join_duration_clamped() -> None:
+    # 0xFF means "forever" in the spec — we never want that; clamp to 0xFE.
+    assert build_zdo_mgmt_permit_join_request(duration_s=10_000).endswith("FE00")
+    assert build_zdo_mgmt_permit_join_request(duration_s=0)[-4:] == "0100"
