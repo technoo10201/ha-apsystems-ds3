@@ -509,15 +509,18 @@ address is updated automatically) or expiry.
 > has a 120 s floor. During a campaign, far inverters may show stale data
 > with `state: idle`; they are deliberately never escalated to `dead` by
 > campaign-induced failures and recover within minutes of the campaign's
-> end. Each cycle also broadcasts a standard Zigbee **permit-join** window
-> so the unpaired inverter *could* associate through its mesh neighbours —
-> the piece the upstream firmware never sends. Field honesty: in the one
-> installation this was tested on, a DS3 with two paired neighbours 2 m
-> away never joined through them across 22 clean cycles at peak sun — the
-> inverter-side firmware does not appear to attempt router association
-> during the proprietary handshake. The broadcast is kept because it is
-> free, harmless, and other inverter generations may behave differently.
-> Plan for physical proximity for the very first pairing.
+> end.
+>
+> The pair handshake reply travels by **direct radio** from the inverter to
+> the dongle — an inverter beyond direct range cannot complete it even
+> though the mesh relays the request. Field-tested: a DS3 with two paired
+> neighbours 2 m away never answered across two days of clean campaigns at
+> peak sun, and a standard Zigbee permit-join broadcast did not make it join
+> through those neighbours either. Treat persistent re-bind as a way to
+> catch a **marginal direct** link over time, not as a way to reach an
+> inverter that has no direct path. For the very first pairing of an
+> out-of-range inverter, plan for physical proximity.
+
 Best started around solar noon. If several campaigns on different days all
 fail, the link budget verdict is final: pair once with the dongle
 physically next to the inverter, then move it back (the binding survives,
