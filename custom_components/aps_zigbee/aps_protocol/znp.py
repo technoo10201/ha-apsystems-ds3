@@ -40,6 +40,15 @@ DEFAULT_READ_TIMEOUT_S: Final[float] = 2.0
 # arrive back-to-back with sub-frame gaps.
 BURST_QUIET_S: Final[float] = 0.5
 BAUDRATE: Final[int] = 115200
+# `pyserial-asyncio-fast` pushes the whole frame to the fd in one eager
+# syscall, while the original `pyserial-asyncio` dribbled it out through the
+# event-loop writer. Field observation (July 2026, CH340E + CC2530/CC2591):
+# the first long frame written in one burst (the 45-byte NO broadcast) wedges
+# the dongle — it stops answering anything until a USB reset. Pacing the
+# writes into small chunks with a breather in between reproduces the old
+# lib's cadence and keeps the CH340E alive.
+WRITE_CHUNK_BYTES: Final[int] = 16
+WRITE_INTER_CHUNK_S: Final[float] = 0.002
 
 
 class ZNPError(Exception):
@@ -97,15 +106,24 @@ class ZNP:
         """
         if self._writer is not None:
             return
-        if self._dtr_reset:
-            await asyncio.get_running_loop().run_in_executor(None, self._pulse_reset)
-        self._reader, self._writer = await serial_asyncio.open_serial_connection(
-            url=self._port,
-            baudrate=self._baudrate,
-            bytesize=8,
-            parity="N",
-            stopbits=1,
-        )
+        # The device can disappear at any point (CH340 hot-unplug, USB reset
+        # while we are opening): surface that as ZNPError so callers retry via
+        # their normal recovery paths instead of blowing up the setup with an
+        # unhandled SerialException (observed in the field, July 2026).
+        try:
+            if self._dtr_reset:
+                await asyncio.get_running_loop().run_in_executor(
+                    None, self._pulse_reset
+                )
+            self._reader, self._writer = await serial_asyncio.open_serial_connection(
+                url=self._port,
+                baudrate=self._baudrate,
+                bytesize=8,
+                parity="N",
+                stopbits=1,
+            )
+        except (SerialException, OSError) as err:
+            raise ZNPError(f"could not open {self._port}: {err}") from err
         self._release_control_lines()
 
     def _pulse_reset(self) -> None:
@@ -168,12 +186,7 @@ class ZNP:
         frame = _build_frame(payload_hex)
         async with self._lock:
             await self._drain_input()
-            try:
-                self._writer.write(frame)
-                await self._writer.drain()
-            except (SerialException, OSError, ConnectionError) as err:
-                await self._mark_disconnected()
-                raise ZNPError(f"transport write failed: {err}") from err
+            await self._write_frame(frame)
         _LOGGER.debug("ZNP TX %s", frame.hex().upper())
 
     async def recv(self) -> str:
@@ -195,14 +208,22 @@ class ZNP:
         frame = _build_frame(payload_hex)
         async with self._lock:
             await self._drain_input()
-            try:
-                self._writer.write(frame)
-                await self._writer.drain()
-            except (SerialException, OSError, ConnectionError) as err:
-                await self._mark_disconnected()
-                raise ZNPError(f"transport write failed: {err}") from err
+            await self._write_frame(frame)
             _LOGGER.debug("ZNP TX %s", frame.hex().upper())
             return await self._read_burst()
+
+    async def _write_frame(self, frame: bytes) -> None:
+        """Write `frame` in small paced chunks (see WRITE_CHUNK_BYTES note)."""
+        assert self._writer is not None
+        try:
+            for offset in range(0, len(frame), WRITE_CHUNK_BYTES):
+                self._writer.write(frame[offset : offset + WRITE_CHUNK_BYTES])
+                await self._writer.drain()
+                if offset + WRITE_CHUNK_BYTES < len(frame):
+                    await asyncio.sleep(WRITE_INTER_CHUNK_S)
+        except (SerialException, OSError, ConnectionError) as err:
+            await self._mark_disconnected()
+            raise ZNPError(f"transport write failed: {err}") from err
 
     async def _drain_input(self) -> None:
         """Discard whatever bytes are pending without blocking."""
