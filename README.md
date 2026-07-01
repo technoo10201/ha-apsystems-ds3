@@ -1,5 +1,13 @@
 # APsystems DS3 — Home Assistant HACS plugin
 
+<p align="center">
+  <img src="custom_components/aps_zigbee/brand/icon@2x.png" alt="APsystems DS3 integration logo" width="160">
+</p>
+
+<p align="center">
+  <img src="img/CC2530.png" alt="CC2530 + CC2591 Zigbee dongle for the APsystems off-cloud Home Assistant integration" width="480">
+</p>
+
 Home Assistant custom component that talks **directly** to a CC2530 USB-serial
 Zigbee dongle flashed with the proprietary **Kadsol** firmware
 (`CC2530ZNP-with-SBL.hex`) to poll **APsystems DS3** micro-inverters. No ECU,
