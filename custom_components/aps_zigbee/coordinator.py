@@ -73,6 +73,7 @@ from .const import (
     INV_NAME,
     INV_SERIAL,
     RECOVERY_BACKOFF_S,
+    RECOVERY_IDLE_RETRY_S,
     RECOVERY_RETRIES,
     SENSOR_ACV,
     SENSOR_ENERGY_P1,
@@ -120,6 +121,13 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
         self._runtimes: dict[str, InverterRuntime] = {}
         self._init_done = False
         self._watchdog_task: asyncio.Task[None] | None = None
+        # Re-entrancy guard for _async_recover: the watchdog and the polling
+        # loop can both request a recovery in the same window; only one may
+        # drive the serial port at a time. Also remembers when the last
+        # (exhausted) recovery ended so the watchdog can retry at a slow,
+        # steady cadence instead of giving up forever.
+        self._recovering = False
+        self._last_recovery_end: datetime | None = None
         # Tracks the day/night state of the previous update cycle so the
         # night→day transition (sunrise) can reset the failure counters.
         # Starting at False means the first daytime cycle after a (re)start
@@ -701,6 +709,23 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
             while True:
                 await asyncio.sleep(WATCHDOG_INTERVAL_S)
                 if not self._init_done:
+                    # A previous recovery exhausted its retries (or one is on
+                    # the air right now). Never give up for good: the CH340 is
+                    # known to drop off the bus and come back, so retry at a
+                    # slow, steady cadence instead of leaving the integration
+                    # dead until a human reloads it.
+                    if (
+                        not self._recovering
+                        and (
+                            self._last_recovery_end is None
+                            or (_utcnow() - self._last_recovery_end)
+                            >= timedelta(seconds=RECOVERY_IDLE_RETRY_S)
+                        )
+                    ):
+                        _LOGGER.warning(
+                            "watchdog: coordinator still down, retrying recovery"
+                        )
+                        await self._async_recover()
                     continue
                 # Skip if a recent polling cycle already succeeded — it counts
                 # as a liveness proof and we don't want to add load.
@@ -737,29 +762,43 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
           - **Hard**: dongle is wedged → fall back to `init_coordinator`, which
             does a SYS_RESET. Already-paired inverters will need to be
             re-paired by the user because their short-addr routes are gone.
+
+        Re-entrant calls (watchdog + polling loop racing) coalesce into the
+        recovery already in flight instead of driving the port concurrently.
         """
-        await self.znp.close()
-        self._init_done = False
-        for attempt in range(RECOVERY_RETRIES):
-            delay = RECOVERY_BACKOFF_S[min(attempt, len(RECOVERY_BACKOFF_S) - 1)]
-            _LOGGER.info("coordinator recovery attempt %s after %s s", attempt + 1, delay)
-            await asyncio.sleep(delay)
-            try:
-                await self.znp.open()
-                if await check_coordinator(self.znp):
-                    self._init_done = True
-                    _LOGGER.info("coordinator soft-recovered on attempt %s", attempt + 1)
-                    await self.async_request_refresh()
-                    return
-                if await init_coordinator(self.znp, self._ecu_id):
-                    self._init_done = True
-                    _LOGGER.info("coordinator hard-recovered on attempt %s", attempt + 1)
-                    await self.async_request_refresh()
-                    return
-            except ZNPError as err:
-                _LOGGER.warning("recovery attempt %s failed: %s", attempt + 1, err)
-                await self.znp.close()
-        _LOGGER.error("coordinator recovery exhausted; sensors will go unavailable")
+        if self._recovering:
+            _LOGGER.debug("recovery already in progress, skipping duplicate request")
+            return
+        self._recovering = True
+        try:
+            await self.znp.close()
+            self._init_done = False
+            for attempt in range(RECOVERY_RETRIES):
+                delay = RECOVERY_BACKOFF_S[min(attempt, len(RECOVERY_BACKOFF_S) - 1)]
+                _LOGGER.info("coordinator recovery attempt %s after %s s", attempt + 1, delay)
+                await asyncio.sleep(delay)
+                try:
+                    await self.znp.open()
+                    if await check_coordinator(self.znp):
+                        self._init_done = True
+                        _LOGGER.info("coordinator soft-recovered on attempt %s", attempt + 1)
+                        await self.async_request_refresh()
+                        return
+                    if await init_coordinator(self.znp, self._ecu_id):
+                        self._init_done = True
+                        _LOGGER.info("coordinator hard-recovered on attempt %s", attempt + 1)
+                        await self.async_request_refresh()
+                        return
+                except ZNPError as err:
+                    _LOGGER.warning("recovery attempt %s failed: %s", attempt + 1, err)
+                    await self.znp.close()
+            _LOGGER.error(
+                "coordinator recovery exhausted; sensors unavailable, retrying in %s s",
+                RECOVERY_IDLE_RETRY_S,
+            )
+        finally:
+            self._recovering = False
+            self._last_recovery_end = _utcnow()
 
     # ------------------------------------------------------------------ helpers
 

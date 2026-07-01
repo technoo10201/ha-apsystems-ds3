@@ -39,6 +39,7 @@ STARTUP_RETRIES: Final = 3  # async_setup_entry init attempts
 STARTUP_RETRY_DELAY_S: Final = 2
 RECOVERY_RETRIES: Final = 3  # coordinator recovery attempts before giving up
 RECOVERY_BACKOFF_S: Final = (5, 30, 120, 600)  # 5 s, 30 s, 2 min, then 10 min
+RECOVERY_IDLE_RETRY_S: Final = 900  # after recovery exhausted, retry every 15 min
 
 # Service names
 SERVICE_PAIR_INVERTER: Final = "pair_inverter"
