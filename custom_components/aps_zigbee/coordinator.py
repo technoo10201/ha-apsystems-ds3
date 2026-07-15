@@ -33,7 +33,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.sun import is_up
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .aps_protocol.coordinator import check_coordinator, init_coordinator
+from .aps_protocol.coordinator import check_network, init_coordinator
 from .aps_protocol.decode_ds3 import DS3Reading, derive_power
 from .aps_protocol.frames import (
     build_no_command,
@@ -736,13 +736,23 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
                     < timedelta(seconds=WATCHDOG_INTERVAL_S)
                 ):
                     continue
-                try:
-                    alive = await check_coordinator(self.znp)
-                except ZNPError as err:
-                    _LOGGER.warning("watchdog: transport error: %s", err)
-                    alive = False
-                if not alive:
+                info = await check_network(self.znp)
+                if info is None:
                     _LOGGER.warning("watchdog: coordinator did not answer, recovering")
+                    self.async_set_update_error(
+                        UpdateFailed("CC2530 did not answer the watchdog")
+                    )
+                    await self._async_recover()
+                elif not info.network_up:
+                    _LOGGER.warning(
+                        "watchdog: serial alive but Zigbee network down "
+                        "(DeviceState=0x%02X, ShortAddr=%s) — recovering",
+                        info.device_state,
+                        info.short_addr,
+                    )
+                    self.async_set_update_error(
+                        UpdateFailed("Zigbee network down (DEV_HOLD)")
+                    )
                     await self._async_recover()
         except asyncio.CancelledError:
             raise
@@ -755,13 +765,12 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
         """Close + reopen + (soft- or hard-) re-init the coordinator with backoff.
 
         Two paths:
-          - **Soft**: the dongle still answers `check_coordinator` after the
-            reopen → trust that the NWK table (and paired inverters' routes)
-            survived. Skip the full init so we don't SYS_RESET those routes
-            away.
-          - **Hard**: dongle is wedged → fall back to `init_coordinator`, which
-            does a SYS_RESET. Already-paired inverters will need to be
-            re-paired by the user because their short-addr routes are gone.
+          - **Soft**: `check_network` returns info with `network_up=True` → the
+            Zigbee network survived the re-enumeration; skip the full init so
+            we don't SYS_RESET the mesh routing tables away.
+          - **Hard**: serial answers but Zigbee network is down (DEV_HOLD), or
+            the dongle is wedged (check_network returns None) → fall back to
+            `init_coordinator`, which performs a SYS_RESET.
 
         Re-entrant calls (watchdog + polling loop racing) coalesce into the
         recovery already in flight instead of driving the port concurrently.
@@ -779,11 +788,27 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
                 await asyncio.sleep(delay)
                 try:
                     await self.znp.open()
-                    if await check_coordinator(self.znp):
+                    info = await check_network(self.znp)
+                    if info is not None and info.network_up:
                         self._init_done = True
-                        _LOGGER.info("coordinator soft-recovered on attempt %s", attempt + 1)
+                        _LOGGER.info(
+                            "coordinator soft-recovered on attempt %s "
+                            "(DeviceState=0x%02X, ShortAddr=%s)",
+                            attempt + 1,
+                            info.device_state,
+                            info.short_addr,
+                        )
                         await self.async_request_refresh()
                         return
+                    if info is not None:
+                        # Serial answers but the Zigbee network is down (DEV_HOLD).
+                        _LOGGER.warning(
+                            "soft recovery rejected: serial answers but Zigbee "
+                            "network is down (DeviceState=0x%02X, ShortAddr=%s) "
+                            "— escalating to hard recovery",
+                            info.device_state,
+                            info.short_addr,
+                        )
                     if await init_coordinator(self.znp, self._ecu_id):
                         self._init_done = True
                         _LOGGER.info("coordinator hard-recovered on attempt %s", attempt + 1)
@@ -864,8 +889,9 @@ class APSDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
         last = (self.data or {}).get(serial) or {}
         payload = dict(last)
         payload.update(runtime.to_attributes())
-        # availability follows the existing state — backoff doesn't flip it.
-        payload.setdefault("available", runtime.state is not InverterState.DEAD)
+        # availability always reflects the current state — a stale `available: True`
+        # carried in `last` must never override a DEAD verdict.
+        payload["available"] = runtime.state is not InverterState.DEAD
         return payload
 
 

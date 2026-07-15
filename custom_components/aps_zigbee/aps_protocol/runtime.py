@@ -87,11 +87,15 @@ class InverterRuntime:
     ) -> None:
         """Update state after a failed poll attempt.
 
-        At night the state collapses to `IDLE` and we don't count toward the
-        `DEAD` threshold — see the module docstring for the rationale.
+        At night we don't count toward the `DEAD` threshold and collapse the
+        state to `IDLE` — *unless the inverter is already DEAD*, in which case
+        the DEAD state latches through the night.  Failure counters are reset
+        at sunrise by `reset_night_counters` so the inverter gets a fresh set
+        of chances once the sun is back up.
         """
         if not sun_is_up:
-            self.state = InverterState.IDLE
+            if self.state is not InverterState.DEAD:
+                self.state = InverterState.IDLE
             # We still set a backoff so we don't hammer the bus all night.
             self.next_retry_after = now + timedelta(seconds=min(cap_s, 60))
             return

@@ -9,71 +9,23 @@ before the module is imported.
 from __future__ import annotations
 
 import asyncio
-import sys
-import types
 from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.ha_stubs import install_ha_stubs
+
 # --------------------------------------------------------------------- HA stubs
 
-
-def _install_ha_stubs() -> None:
-    if "homeassistant" in sys.modules:
-        return
-
-    ha = types.ModuleType("homeassistant")
-
-    exceptions = types.ModuleType("homeassistant.exceptions")
-
-    class ConfigEntryNotReady(Exception):
-        pass
-
-    exceptions.ConfigEntryNotReady = ConfigEntryNotReady
-
-    helpers = types.ModuleType("homeassistant.helpers")
-    device_registry = MagicMock(name="homeassistant.helpers.device_registry")
-    sun = types.ModuleType("homeassistant.helpers.sun")
-    sun.is_up = lambda hass: True
-
-    update_coordinator = types.ModuleType("homeassistant.helpers.update_coordinator")
-
-    class UpdateFailed(Exception):
-        pass
-
-    class DataUpdateCoordinator:
-        """Bare-bones stand-in exposing only what APSDataUpdateCoordinator uses."""
-
-        def __class_getitem__(cls, item):
-            return cls
-
-        def __init__(self, hass, logger, *, name, update_interval):
-            self.hass = hass
-            self.logger = logger
-            self.name = name
-            self.update_interval = update_interval
-            self.last_update_success = True
-            # NB: pas de `last_update_success_time` ici — APSDataUpdateCoordinator
-            # définit sa propre property read-only du même nom.
-
-        async def async_request_refresh(self) -> None:
-            return None
-
-    update_coordinator.DataUpdateCoordinator = DataUpdateCoordinator
-    update_coordinator.UpdateFailed = UpdateFailed
-
-    sys.modules["homeassistant"] = ha
-    sys.modules["homeassistant.exceptions"] = exceptions
-    sys.modules["homeassistant.helpers"] = helpers
-    sys.modules["homeassistant.helpers.device_registry"] = device_registry
-    sys.modules["homeassistant.helpers.sun"] = sun
-    sys.modules["homeassistant.helpers.update_coordinator"] = update_coordinator
-
-
-_install_ha_stubs()
+install_ha_stubs()
 
 from custom_components.aps_zigbee import coordinator as coordinator_mod  # noqa: E402
+from custom_components.aps_zigbee.aps_protocol.frames import (  # noqa: E402
+    COORDINATOR_SHORT_ADDR,
+    DEVICE_STATE_ZB_COORD,
+    CoordinatorDeviceInfo,
+)
 from custom_components.aps_zigbee.const import (  # noqa: E402
     CONF_ECU_ID,
     CONF_PORT,
@@ -83,6 +35,26 @@ from custom_components.aps_zigbee.const import (  # noqa: E402
 from custom_components.aps_zigbee.coordinator import (  # noqa: E402
     APSDataUpdateCoordinator,
     _utcnow,
+)
+
+# --------------------------------------------------------------------- helpers
+
+_HEALTHY_INFO = CoordinatorDeviceInfo(
+    status=0,
+    ieee="D8A3011B9780FFFF",
+    short_addr=COORDINATOR_SHORT_ADDR,
+    device_type=7,
+    device_state=DEVICE_STATE_ZB_COORD,
+    num_assoc=0,
+)
+
+_DEV_HOLD_INFO = CoordinatorDeviceInfo(
+    status=0,
+    ieee="D8A3011B9780FFFF",
+    short_addr="FFFE",
+    device_type=7,
+    device_state=0x00,
+    num_assoc=0,
 )
 
 # --------------------------------------------------------------------- fixtures
@@ -114,11 +86,11 @@ async def test_concurrent_recover_calls_coalesce() -> None:
 
     async def blocked_check(znp):
         await gate.wait()
-        return True
+        return _HEALTHY_INFO
 
     with (
         _instant_sleep(),
-        patch.object(coordinator_mod, "check_coordinator", side_effect=blocked_check)
+        patch.object(coordinator_mod, "check_network", side_effect=blocked_check)
         as check_mock,
     ):
         task1 = asyncio.ensure_future(coord._async_recover())
@@ -206,3 +178,86 @@ async def test_watchdog_skips_while_recovery_in_flight() -> None:
             await coord._watchdog_loop()
 
     assert coord._async_recover.await_count == 0
+
+
+# --------------------------------------------------------------------- soft/hard recovery dispatch
+
+
+async def test_soft_recovery_trusts_healthy_network() -> None:
+    """When check_network reports network_up=True, init_coordinator is never called."""
+    coord = _make_coordinator()
+
+    with (
+        _instant_sleep(),
+        patch.object(coordinator_mod, "check_network", return_value=_HEALTHY_INFO),
+        patch.object(
+            coordinator_mod, "init_coordinator", new=AsyncMock()
+        ) as init_mock,
+    ):
+        await coord._async_recover()
+
+    assert coord._init_done is True
+    assert coord._recovering is False
+    init_mock.assert_not_awaited()
+
+
+async def test_soft_recovery_escalates_to_hard_on_dev_hold() -> None:
+    """DEV_HOLD after reopen (serial answers, network down) → init_coordinator runs."""
+    coord = _make_coordinator()
+
+    with (
+        _instant_sleep(),
+        patch.object(coordinator_mod, "check_network", return_value=_DEV_HOLD_INFO),
+        patch.object(
+            coordinator_mod, "init_coordinator", new=AsyncMock(return_value=True)
+        ) as init_mock,
+    ):
+        await coord._async_recover()
+
+    assert coord._init_done is True
+    assert coord._recovering is False
+    init_mock.assert_awaited_once()
+
+
+# --------------------------------------------------------------------- watchdog dispatch
+
+
+async def test_watchdog_no_recovery_when_network_up() -> None:
+    """Healthy check_network response must not trigger recovery."""
+    coord = _make_coordinator()
+    coord._init_done = True
+    coord._async_recover = AsyncMock(name="_async_recover")
+
+    with (
+        patch.object(coordinator_mod, "check_network", return_value=_HEALTHY_INFO),
+        patch.object(
+            coordinator_mod.asyncio,
+            "sleep",
+            new=AsyncMock(side_effect=[None, asyncio.CancelledError()]),
+        ),
+    ):
+        with pytest.raises(asyncio.CancelledError):
+            await coord._watchdog_loop()
+
+    coord._async_recover.assert_not_awaited()
+
+
+async def test_watchdog_recovers_on_dev_hold_despite_serial_alive() -> None:
+    """DEV_HOLD from watchdog check triggers recovery and marks update as failed."""
+    coord = _make_coordinator()
+    coord._init_done = True
+    coord._async_recover = AsyncMock(name="_async_recover")
+
+    with (
+        patch.object(coordinator_mod, "check_network", return_value=_DEV_HOLD_INFO),
+        patch.object(
+            coordinator_mod.asyncio,
+            "sleep",
+            new=AsyncMock(side_effect=[None, asyncio.CancelledError()]),
+        ),
+    ):
+        with pytest.raises(asyncio.CancelledError):
+            await coord._watchdog_loop()
+
+    coord._async_recover.assert_awaited_once()
+    assert coord.last_update_success is False

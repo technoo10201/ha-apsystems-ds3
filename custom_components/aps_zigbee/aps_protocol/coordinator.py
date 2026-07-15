@@ -16,13 +16,21 @@ import asyncio
 import logging
 
 from .frames import (
+    CoordinatorDeviceInfo,
     build_check_alive_command,
     build_coordinator_init_commands,
+    build_device_info_command,
     build_no_command,
+    parse_device_info,
 )
 from .znp import ZNP, ZNPError
 
 _LOGGER = logging.getLogger(__name__)
+
+# Settling time after a SAPI_GET_DEVICE_INFO (0x6700) command.  The Kadsol
+# firmware requires this pause before the next command can be queued safely,
+# mirroring the same delay already present in `init_coordinator`.
+_SETTLE_AFTER_DEVICE_INFO_S = 1.5
 
 # Marker found in the dongle reply when a write-config / start-request command
 # succeeded. Comes from the comments in `ZIGBEE_COORDINATOR.ino:50-66`.
@@ -58,7 +66,7 @@ async def init_coordinator(znp: ZNP, ecu_id: str, *, normal_ops: bool = True) ->
         # 2600 starts the radio; 6700 reads device info. Both need extra
         # settling time before the next command can be queued.
         if cmd in ("2600", "6700"):
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(_SETTLE_AFTER_DEVICE_INFO_S)
 
     if normal_ops:
         try:
@@ -86,3 +94,29 @@ async def check_coordinator(znp: ZNP) -> bool:
     except ZNPError:
         return False
     return bool(reply) and "FE" in reply.upper()
+
+
+async def check_network(znp: ZNP) -> CoordinatorDeviceInfo | None:
+    """Probe the Zigbee network state via SAPI_GET_DEVICE_INFO (0x6700).
+
+    Returns a `CoordinatorDeviceInfo` describing whether the network is up
+    (DeviceState=0x09, ShortAddr=0x0000) or stuck in DEV_HOLD after a serial
+    re-enumeration.  Returns None on transport error (ZNPError) so the caller
+    treats both "silent" and "wedged" as requiring hard recovery.
+
+    After a successful request the function waits `_SETTLE_AFTER_DEVICE_INFO_S`
+    seconds — the Kadsol firmware requires this settling time after any 6700
+    query before the next command can be queued, mirroring the delay already
+    present in `init_coordinator`.
+
+    Criterion for soft recovery: `info is not None and info.network_up`.
+    Merely answering on the serial line is not enough — the Zigbee network
+    must be confirmed operational.
+    """
+    try:
+        burst = await znp.request(build_device_info_command())
+    except ZNPError:
+        return None
+    info = parse_device_info(burst)
+    await asyncio.sleep(_SETTLE_AFTER_DEVICE_INFO_S)
+    return info
