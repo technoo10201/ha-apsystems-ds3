@@ -10,6 +10,8 @@ The reference implementation we port is patience4711/ESP32-read-APS-inverters
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 # The APS firmware uses an arbitrary 6-byte coordinator identity. Any value
 # accepted; once an inverter is paired with one ECU_ID it remembers it, so
 # changing it forces re-pairing. The default matches the upstream firmware.
@@ -175,6 +177,125 @@ def build_zdo_mgmt_rtg_request(dst_addr: str = "0000", start_index: int = 0) -> 
     """
     wire_dst = swap_inv_id_bytes(dst_addr)
     return f"2532{wire_dst}{start_index:02X}"
+
+
+# --- SAPI_GET_DEVICE_INFO (cmd 0x6700) ---
+
+# CC2530 DeviceState values reported in the SAPI_GET_DEVICE_INFO response.
+DEVICE_STATE_DEV_HOLD = 0x00   # radio not yet joined / network down
+DEVICE_STATE_ZB_COORD = 0x09   # running as Zigbee coordinator (network up)
+
+# Short address owned by the coordinator when the network is operational.
+COORDINATOR_SHORT_ADDR = "0000"
+
+
+def build_device_info_command() -> str:
+    """Return the SAPI_GET_DEVICE_INFO_REQ command (0x6700).
+
+    Network-state probe for the CC2530: the response carries the coordinator's
+    IEEE address, short address, DeviceType, DeviceState (0x09 = DEV_ZB_COORD
+    when the Zigbee network is up; 0x00 = DEV_HOLD when the radio has not yet
+    joined or has lost its network) and the count of associated devices.
+    """
+    return "6700"
+
+
+@dataclass(frozen=True)
+class CoordinatorDeviceInfo:
+    """Parsed SAPI_GET_DEVICE_INFO_RSP (cmd 0x6700) frame."""
+
+    status: int
+    ieee: str        # big-endian hex string, 16 chars (8 bytes)
+    short_addr: str  # big-endian hex string, 4 chars (e.g. "0000" or "FFFE")
+    device_type: int
+    device_state: int
+    num_assoc: int
+
+    @property
+    def network_up(self) -> bool:
+        """True when the Zigbee network is fully operational.
+
+        The CC2530 must be acting as coordinator (DeviceState=0x09) *and* have
+        claimed the coordinator short address (0x0000).  Any other combination
+        means DEV_HOLD or an unexpected intermediate state.
+        """
+        return (
+            self.device_state == DEVICE_STATE_ZB_COORD
+            and self.short_addr == COORDINATOR_SHORT_ADDR
+        )
+
+
+def parse_device_info(burst: str) -> CoordinatorDeviceInfo | None:
+    """Extract the last SAPI_GET_DEVICE_INFO_RSP (cmd 6700) from a ZNP burst.
+
+    Scans `burst` for ZNP frames whose CMD bytes are 0x67 0x00 and whose
+    LEN field covers at least the 14-byte SAPI_GET_DEVICE_INFO payload.
+    Returns the *last* valid match as a `CoordinatorDeviceInfo`, or None when
+    no complete 6700 frame is present.
+
+    ZNP frame layout (hex string): FE LEN(1) CMD0(1) CMD1(1) payload(LEN) FCS(1).
+
+    Payload layout (14 bytes):
+        Status    (1 B)
+        IEEE      (8 B, little-endian on wire → stored big-endian)
+        ShortAddr (2 B, little-endian on wire → stored big-endian)
+        DeviceType   (1 B)
+        DeviceState  (1 B)
+        NumAssoc     (1 B)
+
+    Technique mirrors `extract_route`: scan forward, accumulate the last
+    valid hit so burst noise before the real frame is silently skipped.
+    """
+    burst_u = burst.upper().replace(" ", "")
+    result: CoordinatorDeviceInfo | None = None
+    pos = 0
+    while True:
+        pos = burst_u.find("FE", pos)
+        if pos == -1:
+            break
+        # Minimum: FE(2) + LEN(2) + CMD(4) = 8 chars before any payload.
+        if pos + 8 > len(burst_u):
+            break
+        try:
+            length = int(burst_u[pos + 2 : pos + 4], 16)
+        except ValueError:
+            pos += 2
+            continue
+        cmd = burst_u[pos + 4 : pos + 8]
+        if cmd != "6700":
+            pos += 2
+            continue
+        # The SAPI_GET_DEVICE_INFO payload is always 14 bytes (0x0E).
+        if length < 0x0E:
+            pos += 2
+            continue
+        payload_start = pos + 8
+        payload_end = payload_start + length * 2
+        # +2 for the FCS byte that must be present for a complete frame.
+        if payload_end + 2 > len(burst_u):
+            # Truncated frame — stop scanning (nothing useful follows).
+            break
+        payload = burst_u[payload_start:payload_end]
+        status = int(payload[0:2], 16)
+        # IEEE: 8 bytes LE → reverse each byte pair to obtain BE.
+        ieee_le = payload[2:18]
+        ieee_be = "".join(ieee_le[i : i + 2] for i in range(14, -2, -2))
+        # ShortAddr: 2 bytes LE → swap using the existing helper.
+        short_le = payload[18:22]
+        short_be = swap_inv_id_bytes(short_le)
+        device_type = int(payload[22:24], 16)
+        device_state = int(payload[24:26], 16)
+        num_assoc = int(payload[26:28], 16)
+        result = CoordinatorDeviceInfo(
+            status=status,
+            ieee=ieee_be,
+            short_addr=short_be,
+            device_type=device_type,
+            device_state=device_state,
+            num_assoc=num_assoc,
+        )
+        pos = payload_end + 2  # step over FCS
+    return result
 
 
 def extract_route(burst: str, inv_id: str) -> list[str] | None:

@@ -199,3 +199,26 @@ def test_backoff_window_uses_capped_seconds() -> None:
         rt.record_failure(_T0, sun_is_up=True, dead_threshold=99, cap_s=30)
     delta = (rt.next_retry_after - _T0).total_seconds()
     assert delta == 30
+
+
+def test_night_failure_does_not_revive_dead() -> None:
+    """A DEAD inverter must stay DEAD through the night, not revert to IDLE.
+
+    Previously `record_failure` unconditionally set `state = IDLE` at night,
+    so an inverter that died at dusk would silently re-appear as `available`
+    until the next daytime failure streak. This test pins the fix.
+    """
+    rt = InverterRuntime(serial="x")
+
+    # Kill the inverter during the day
+    for _ in range(5):
+        rt.record_failure(_T0, sun_is_up=True, dead_threshold=5)
+    assert rt.state is InverterState.DEAD
+
+    # Night failure: state must remain DEAD
+    night = _T0 + timedelta(hours=8)
+    rt.record_failure(night, sun_is_up=False, dead_threshold=5)
+    assert rt.state is InverterState.DEAD
+    # A backoff is still set so the bus isn't hammered all night
+    assert rt.next_retry_after is not None
+    assert rt.next_retry_after > night
