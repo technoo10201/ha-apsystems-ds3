@@ -1,6 +1,11 @@
 # APsystems DS3 — Home Assistant HACS plugin
 
 <p align="center">
+  <a href="https://github.com/technoo10201/ha-apsystems-ds3/releases"><img src="https://img.shields.io/github/downloads/technoo10201/ha-apsystems-ds3/total?label=downloads" alt="GitHub downloads"></a>
+  <a href="https://github.com/technoo10201/ha-apsystems-ds3/releases/latest"><img src="https://img.shields.io/github/v/release/technoo10201/ha-apsystems-ds3" alt="Latest release"></a>
+</p>
+
+<p align="center">
   <img src="custom_components/aps_zigbee/brand/icon@2x.png" alt="APsystems DS3 integration logo" width="160">
 </p>
 

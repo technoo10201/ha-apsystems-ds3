@@ -1,0 +1,24 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  zip:
+    name: Attach integration zip
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+      - name: Build aps_zigbee.zip
+        run: |
+          cd custom_components/aps_zigbee
+          zip -r ../../aps_zigbee.zip . -x '__pycache__/*' '*.pyc'
+      - name: Upload zip to the release
+        run: gh release upload "${{ github.event.release.tag_name }}" aps_zigbee.zip --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}

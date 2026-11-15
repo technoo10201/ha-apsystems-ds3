@@ -2,6 +2,7 @@
     "name": "APsystems Zigbee (CC2530 direct)",
     "content_in_root": false,
     "render_readme": true,
-    "zip_release": false,
+    "zip_release": true,
+    "filename": "aps_zigbee.zip",
     "homeassistant": "2024.1.0"
 }
